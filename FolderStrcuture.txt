@@ -1,21 +1,19 @@
 src/
+  components/
+    layout/
+      Navbar.jsx
+      Footer.jsx
+    sections/
+      HeroSection.jsx
+      FeaturesSection.jsx
+      DemoSection.jsx
+      ReadySection.jsx
+    ui/
+      GradientButton.jsx
+      FeatureCard.jsx
+      SectionContainer.jsx
+  data/
+    features.js
   App.jsx
   main.jsx
   index.css
-  components/
-    LandingPage.jsx
-    WatchRoom.jsx
-    RoomHeader.jsx
-    Chat.jsx
-    VideoPlayer.jsx
-    ParticipantsOverlay.jsx
-    LoadingScreen.jsx
-    ui/
-      Button.jsx
-      Input.jsx
-      Modal.jsx
-      Toast.jsx
-  context/
-    RoomContext.jsx
-  utils/
-    cn.js
