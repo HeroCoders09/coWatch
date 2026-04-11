@@ -1,68 +1,74 @@
-import { useMemo, useState } from "react";
-import { MessageSquare, Smile, Send, Users } from "lucide-react";
-import UsersList from "./UsersList";
+import { useState, useEffect, useRef } from "react";
+import socket from "../../socket";
 
-export default function ChatPanel({ currentUserName = "You", roomId = "ROOMID", roomName = "Room" }) {
-  const [activeTab, setActiveTab] = useState("chat");
+export default function ChatPanel({ roomId, currentUserName }) {
+  const [messages, setMessages] = useState([]);
+  const [message, setMessage] = useState("");
+  const messagesEndRef = useRef(null);
 
-  const users = useMemo(
-    () => [
-      { id: "me", name: currentUserName, isAdmin: true, isYou: true, online: true },
-      // frontend-only placeholders for now
-      { id: "u2", name: "Alex", isAdmin: false, isYou: false, online: true },
-      { id: "u3", name: "Sarah", isAdmin: false, isYou: false, online: true },
-    ],
-    [currentUserName]
-  );
+  useEffect(() => {
+    if (!roomId) return;
+
+    socket.emit("join_room", roomId);
+
+    const handleMessage = (data) => {
+      setMessages((prev) => [...prev, data]);
+    };
+
+    socket.on("receive_message", handleMessage);
+
+    return () => {
+      socket.off("receive_message", handleMessage);
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const sendMessage = () => {
+    if (!message.trim() || !roomId) return;
+
+    const msgData = {
+      roomId,
+      user: currentUserName,
+      message,
+    };
+
+    socket.emit("send_message", msgData);
+
+    setMessage("");
+  };
 
   return (
-    <aside className="border-l border-white/10 bg-[#0d1640]/70">
-      <div className="flex h-16 items-center gap-2 border-b border-white/10 px-4">
-        <button
-          onClick={() => setActiveTab("chat")}
-          className={`flex-1 rounded-xl py-2 text-sm font-semibold ${
-            activeTab === "chat" ? "bg-cyan-500/20 text-white" : "text-white/70"
-          }`}
-        >
-          <MessageSquare size={14} className="mr-1 inline" />
-          Chat
-        </button>
-
-        <button
-          onClick={() => setActiveTab("users")}
-          className={`flex-1 rounded-xl py-2 text-sm font-semibold ${
-            activeTab === "users" ? "bg-cyan-500/20 text-white" : "text-white/70"
-          }`}
-        >
-          <Users size={14} className="mr-1 inline" />
-          Users ({users.length})
-        </button>
-      </div>
-
-      <div className="h-[calc(100%-128px)] overflow-y-auto p-4">
-        {activeTab === "chat" ? (
-          <div className="space-y-3">
-            <div className="rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-white/50">
-              Room "{roomName}" ready. Share Room ID: {roomId}
-            </div>
+    <div className="flex flex-col h-full bg-gray-900 text-white p-4 rounded-xl">
+      
+      <div className="flex-1 overflow-y-auto space-y-2 mb-3">
+        {messages.map((msg, index) => (
+          <div key={index} className="text-sm">
+            <span className="font-semibold">{msg.user}: </span>
+            {msg.message}
           </div>
-        ) : (
-          <UsersList users={users} />
-        )}
+        ))}
+        <div ref={messagesEndRef} />
       </div>
 
-      <div className="flex h-16 items-center gap-2 border-t border-white/10 px-3">
-        <button className="text-white/60">
-          <Smile size={18} />
-        </button>
+      <div className="flex gap-2">
         <input
+          className="flex-1 p-2 rounded bg-gray-800 outline-none"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
           placeholder="Type a message..."
-          className="h-10 flex-1 rounded-xl border border-white/15 bg-white/5 px-3 text-sm text-white placeholder:text-white/40 outline-none"
+          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
         />
-        <button className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500">
-          <Send size={15} />
+
+        <button
+          onClick={sendMessage}
+          className="px-4 py-2 bg-blue-600 rounded hover:bg-blue-700"
+        >
+          Send
         </button>
       </div>
-    </aside>
+    </div>
   );
 }

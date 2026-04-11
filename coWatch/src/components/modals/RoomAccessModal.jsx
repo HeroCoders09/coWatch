@@ -46,26 +46,56 @@ function RoomAccessModalContent({ mode = "create", onClose, onSuccess }) {
     }
   };
 
-  const handleSubmit = () => {
+  // 🔥 NEW: backend call
+  const createRoomFromBackend = async () => {
+    const res = await fetch("http://localhost:3000/create-room", {
+      method: "POST",
+    });
+
+    const data = await res.json();
+    return data.roomId;
+  };
+
+  // 🔥 UPDATED
+  const handleSubmit = async () => {
     if (!name.trim() || !roomNameOrId.trim() || !password.trim()) {
       setError("Please fill all fields.");
       return;
     }
+
     if (!verified) {
       setError("Please complete security verification.");
       return;
     }
 
-    const payload = {
-      name: name.trim(),
-      password: password.trim(),
-      ...(isCreate
-        ? { roomName: roomNameOrId.trim() }
-        : { roomId: roomNameOrId.trim() }),
-    };
+    try {
+      if (isCreate) {
+        // 🔥 CALL BACKEND
+        const roomId = await createRoomFromBackend();
 
-    // IMPORTANT: this drives transition to RoomPage in App.jsx
-    onSuccess?.(payload, mode);
+        onSuccess?.(
+          {
+            name: name.trim(),
+            roomId: roomId, // ✅ now real backend roomId
+            password: password.trim(),
+          },
+          mode
+        );
+      } else {
+        // join stays same
+        onSuccess?.(
+          {
+            name: name.trim(),
+            roomId: roomNameOrId.trim(),
+            password: password.trim(),
+          },
+          mode
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Failed to create room. Try again.");
+    }
   };
 
   return (
