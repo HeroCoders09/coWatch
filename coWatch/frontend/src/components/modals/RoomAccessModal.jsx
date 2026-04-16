@@ -46,58 +46,16 @@ function RoomAccessModalContent({ mode = "create", onClose, onSuccess }) {
     }
   };
 
-  // 🔥 NEW: backend call
-  const createRoomFromBackend = async () => {
-    const res = await fetch("http://localhost:3000/create-room", {
-      method: "POST",
-    });
-
-    const data = await res.json();
-    return data.roomId;
-  };
-
-  // 🔥 UPDATED
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     if (!name.trim() || !roomNameOrId.trim() || !password.trim()) {
       setError("Please fill all fields.");
       return;
     }
-
     if (!verified) {
       setError("Please complete security verification.");
       return;
     }
 
-<<<<<<< HEAD:coWatch/src/components/modals/RoomAccessModal.jsx
-    try {
-      if (isCreate) {
-        // 🔥 CALL BACKEND
-        const roomId = await createRoomFromBackend();
-
-        onSuccess?.(
-          {
-            name: name.trim(),
-            roomId: roomId, // ✅ now real backend roomId
-            password: password.trim(),
-          },
-          mode
-        );
-      } else {
-        // join stays same
-        onSuccess?.(
-          {
-            name: name.trim(),
-            roomId: roomNameOrId.trim(),
-            password: password.trim(),
-          },
-          mode
-        );
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Failed to create room. Try again.");
-    }
-=======
     const payload = {
       name: name.trim(),
       password: password.trim(),
@@ -105,7 +63,6 @@ function RoomAccessModalContent({ mode = "create", onClose, onSuccess }) {
     };
 
     onSuccess?.(payload, mode);
->>>>>>> 04127f3 (feat: initialize backend with room sockets and live presence):coWatch/frontend/src/components/modals/RoomAccessModal.jsx
   };
 
   return (
