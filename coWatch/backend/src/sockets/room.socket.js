@@ -1,5 +1,7 @@
 import { rooms } from "../data/inMemoryStore.js";
 
+const roomVideos = new Map();
+
 function emitUsers(io, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -7,7 +9,7 @@ function emitUsers(io, roomId) {
   const users = Array.from(room.users.values()).map((u) => ({
     socketId: u.socketId,
     userName: u.userName,
-    isAdmin: u.isAdmin,
+    isAdmin: u.userName === room.adminUserName,
   }));
 
   io.to(roomId).emit("presence:users", {
@@ -17,161 +19,178 @@ function emitUsers(io, roomId) {
   });
 }
 
-function emitChatHistory(socket, roomId) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  socket.emit("chat:history", { roomId, messages: room.messages || [] });
-}
-
 export function registerRoomSocket(io, socket) {
-  socket.on("room:create", ({ roomId, roomName, userName }) => {
-    if (!roomId || !userName) return;
 
+  // 🔹 CREATE ROOM
+  socket.on("room:create", ({ roomId, roomName, userName }) => {
     let room = rooms.get(roomId);
+
     if (!room) {
       room = {
         roomId,
-        roomName: roomName || `Room-${roomId.slice(0, 4)}`,
-        adminSocketId: socket.id,
+        roomName,
+        adminUserName: userName,
         users: new Map(),
-        messages: [], // chat history in memory
+        messages: [],
       };
       rooms.set(roomId, room);
     }
 
     socket.join(roomId);
-    room.users.set(socket.id, {
+
+    room.users.set(userName, {
+      userName,
       socketId: socket.id,
-      userName: String(userName).trim(),
-      isAdmin: room.adminSocketId === socket.id,
     });
 
     socket.data.roomId = roomId;
-    socket.data.userName = String(userName).trim();
+    socket.data.userName = userName;
 
     emitUsers(io, roomId);
-    emitChatHistory(socket, roomId);
   });
 
+  // 🔹 JOIN ROOM
   socket.on("room:join", ({ roomId, userName }) => {
     const room = rooms.get(roomId);
-    if (!room) {
-      socket.emit("room:error", { message: "Room not found" });
-      return;
-    }
+    if (!room) return;
 
     socket.join(roomId);
-    room.users.set(socket.id, {
+
+    // overwrite (no duplicates)
+    room.users.set(userName, {
+      userName,
       socketId: socket.id,
-      userName: String(userName).trim(),
-      isAdmin: room.adminSocketId === socket.id,
     });
 
     socket.data.roomId = roomId;
-    socket.data.userName = String(userName).trim();
+    socket.data.userName = userName;
 
-    io.to(roomId).emit("presence:user-joined", { userName: String(userName).trim() });
     emitUsers(io, roomId);
-    emitChatHistory(socket, roomId);
-  });
 
-  socket.on("chat:send", ({ roomId, text }) => {
-    const room = rooms.get(roomId);
-    if (!room) {
-      socket.emit("room:error", { message: "Room not found" });
-      return;
+    // send current video
+    if (roomVideos.has(roomId)) {
+      socket.emit("video:update", {
+        videoUrl: roomVideos.get(roomId),
+      });
     }
 
-    const cleanText = String(text || "").trim();
-    if (!cleanText) return;
+    // send old messages (optional)
+    if (room.messages?.length) {
+      room.messages.forEach((msg) => {
+        socket.emit("chat:message", msg);
+      });
+    }
+  });
 
-    const sender = room.users.get(socket.id);
-    if (!sender) return;
+  // 🔹 VIDEO SET (ADMIN ONLY)
+  socket.on("video:set", ({ roomId, videoUrl }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
 
-    const message = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      roomId,
-      text: cleanText,
-      userName: sender.userName,
-      socketId: socket.id,
-      createdAt: new Date().toISOString(),
+    const currentUser = socket.data.userName;
+
+    if (room.adminUserName !== currentUser) return;
+
+    roomVideos.set(roomId, videoUrl);
+
+    io.to(roomId).emit("video:update", { videoUrl });
+  });
+
+  // 🔥 🔹 ADMIN TRANSFER
+  socket.on("admin:transfer", ({ roomId, targetUserName }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const currentUser = socket.data.userName;
+
+    if (!room.users.has(currentUser)) return;
+    if (room.adminUserName !== currentUser) return;
+    if (!room.users.has(targetUserName)) return;
+
+    room.adminUserName = targetUserName;
+
+    emitUsers(io, roomId);
+  });
+
+  // 🔥 🔹 CHAT MESSAGE (FIXED)
+  socket.on("chat:message", ({ roomId, message, userName }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    if (!message || !userName) return;
+
+    const msg = {
+      userName,
+      message,
+      time: Date.now(),
     };
 
-    room.messages.push(message);
+    // store messages
+    room.messages.push(msg);
 
-    // optional cap (last 200)
-    if (room.messages.length > 200) {
-      room.messages = room.messages.slice(-200);
-    }
-
-    io.to(roomId).emit("chat:new", message);
+    // broadcast
+    io.to(roomId).emit("chat:message", msg);
   });
 
-  socket.on("chat:typing", ({ roomId, isTyping }) => {
+  // 🔹 LEAVE ROOM
+  socket.on("room:leave", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const sender = room.users.get(socket.id);
-    if (!sender) return;
+    const userName = socket.data.userName;
+    const wasAdmin = room.adminUserName === userName;
 
-    // Send to everyone except sender
-    socket.to(roomId).emit("chat:typing", {
-      roomId,
-      userName: sender.userName,
-      isTyping: Boolean(isTyping),
-    });
-  });
-
-  socket.on("room:get-users", ({ roomId }) => {
-    emitUsers(io, roomId);
-  });
-
-  socket.on("room:leave", ({ roomId, userName }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-
+    room.users.delete(userName);
     socket.leave(roomId);
-    room.users.delete(socket.id);
 
-    if (room.adminSocketId === socket.id) {
-      const next = Array.from(room.users.values())[0];
-      room.adminSocketId = next?.socketId || null;
-      if (next) next.isAdmin = true;
+    // admin transfer
+    if (wasAdmin && room.users.size > 0) {
+      const nextUser = Array.from(room.users.values())[0];
+      room.adminUserName = nextUser.userName;
     }
-
-    io.to(roomId).emit("presence:user-left", { userName: userName || "A user" });
 
     if (room.users.size === 0) {
       rooms.delete(roomId);
+      roomVideos.delete(roomId);
     } else {
       emitUsers(io, roomId);
     }
   });
 
+  // 🔹 DISCONNECT (REFRESH SAFE)
   socket.on("disconnect", () => {
     const roomId = socket.data.roomId;
-    if (!roomId) return;
+    const userName = socket.data.userName;
+
+    if (!roomId || !userName) return;
 
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const leftUser = room.users.get(socket.id);
-    room.users.delete(socket.id);
+    setTimeout(() => {
+      const r = rooms.get(roomId);
+      if (!r) return;
 
-    if (room.adminSocketId === socket.id) {
-      const next = Array.from(room.users.values())[0];
-      room.adminSocketId = next?.socketId || null;
-      if (next) next.isAdmin = true;
-    }
+      const user = r.users.get(userName);
 
-    if (leftUser) {
-      io.to(roomId).emit("presence:user-left", { userName: leftUser.userName });
-    }
+      // if reconnected → skip removal
+      if (!user || user.socketId !== socket.id) return;
 
-    if (room.users.size === 0) {
-      rooms.delete(roomId);
-    } else {
-      emitUsers(io, roomId);
-    }
+      const wasAdmin = r.adminUserName === userName;
+
+      r.users.delete(userName);
+
+      if (wasAdmin && r.users.size > 0) {
+        const nextUser = Array.from(r.users.values())[0];
+        r.adminUserName = nextUser.userName;
+      }
+
+      if (r.users.size === 0) {
+        rooms.delete(roomId);
+        roomVideos.delete(roomId);
+      } else {
+        emitUsers(io, roomId);
+      }
+    }, 4000);
   });
 }

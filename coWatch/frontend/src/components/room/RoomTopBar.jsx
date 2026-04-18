@@ -9,6 +9,7 @@ export default function RoomTopBar({
   roomName = "Room",
   roomId = "ROOMID",
   watcherCount = 1,
+  isAdmin = false, // ✅ ADD THIS
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -24,9 +25,11 @@ export default function RoomTopBar({
 
   return (
     <header className="flex h-18 items-center justify-between border-b border-white/10 bg-[#12183f]/70 px-5 backdrop-blur-md">
+      
+      {/* LEFT */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 pr-4">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500">
             <Video size={16} />
           </div>
           <span className="text-2xl font-bold text-sky-300">CoWatch</span>
@@ -45,20 +48,37 @@ export default function RoomTopBar({
         </button>
       </div>
 
+      {/* RIGHT */}
       <div className="flex items-center gap-2">
         <span className="inline-flex items-center gap-1 rounded-xl bg-white/5 px-3 py-2 text-sm text-white/85">
           <Users size={14} /> {watcherCount} watching
         </span>
-        <span className="inline-flex items-center gap-1 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
-          <Crown size={14} /> Admin
-        </span>
-        <button onClick={onInvite} className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-sm hover:bg-white/15">
+
+        {/* ✅ SHOW ONLY FOR ADMIN */}
+        {isAdmin && (
+          <span className="inline-flex items-center gap-1 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
+            <Crown size={14} /> Admin
+          </span>
+        )}
+
+        <button
+          onClick={onInvite}
+          className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-sm hover:bg-white/15"
+        >
           <Link2 size={14} /> Invite
         </button>
-        <button onClick={onSetVideo} className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold">
+
+        <button
+          onClick={onSetVideo}
+          className="inline-flex items-center gap-1 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold"
+        >
           <Video size={14} /> Set Video
         </button>
-        <button onClick={onLeave} className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold">
+
+        <button
+          onClick={onLeave}
+          className="inline-flex items-center gap-1 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold"
+        >
           <LogOut size={14} /> Leave
         </button>
       </div>

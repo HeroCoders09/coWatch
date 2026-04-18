@@ -5,48 +5,88 @@ import ChatPanel from "../components/room/ChatPanel";
 import SetVideoModal from "../components/room/modals/SetVideoModal";
 import LeaveRoomModal from "../components/room/modals/LeaveRoomModal";
 import InviteModal from "../components/room/modals/InviteModal";
-import { socket } from "../services/socket";
+import {socket} from "../services/socket";
 
 export default function RoomPage({ roomData, onLeaveRoom }) {
   const [setVideoOpen, setSetVideoOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [users, setUsers] = useState([]);
+  const [videoUrl, setVideoUrl] = useState("");
 
-  const roomId = roomData?.roomId || "ROOMID";
-  const roomName = roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
-  const currentUserName = roomData?.name || "Guest";
+  // ✅ ROOM ID
+  const params = new URLSearchParams(window.location.search);
+  const roomId =
+    roomData?.roomId ||
+    params.get("roomId") ||
+    window.location.pathname.split("/").pop() ||
+    "ROOMID";
+
+  // 🔥 PERSISTENT USER ID (MAIN FIX)
+  let userId = localStorage.getItem("userId");
+  if (!userId) {
+    userId = Math.random().toString(36).slice(2);
+    localStorage.setItem("userId", userId);
+  }
+
+  // ✅ USERNAME persistence
+  const storedName = localStorage.getItem("username");
+  const currentUserName = roomData?.name || storedName || "Guest";
+
+  const roomName =
+    roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
+
+  const isAdmin = users.some(
+    (u) => u.socketId === socket.id && u.isAdmin
+  );
 
   useEffect(() => {
-    const handleUsers = ({ users: incomingUsers }) => {
-      setUsers(incomingUsers || []);
+    localStorage.setItem("username", currentUserName);
+
+    const handleUsers = ({ users }) => {
+      setUsers(users || []);
     };
 
-    const handleRoomError = ({ message }) => {
-      alert(message || "Room error");
-      onLeaveRoom?.();
+    const handleVideoUpdate = ({ videoUrl }) => {
+      setVideoUrl(videoUrl);
     };
 
     socket.on("presence:users", handleUsers);
-    socket.on("room:error", handleRoomError);
+    socket.on("video:update", handleVideoUpdate);
 
-    socket.emit("room:get-users", { roomId });
+    // 🔥 JOIN FUNCTION (single source)
+    const joinRoom = () => {
+      socket.emit("room:join", {
+        roomId,
+        userName: currentUserName,
+        userId, // 🔥 REQUIRED
+      });
+    };
+
+    // 🔥 join immediately if already connected
+    if (socket.connected) {
+      joinRoom();
+    }
+
+    // 🔥 join on reconnect
+    socket.on("connect", joinRoom);
 
     return () => {
       socket.off("presence:users", handleUsers);
-      socket.off("room:error", handleRoomError);
+      socket.off("video:update", handleVideoUpdate);
+      socket.off("connect", joinRoom);
     };
-  }, [roomId, onLeaveRoom]);
+  }, [roomId, currentUserName]);
 
   const handleConfirmLeave = () => {
-    socket.emit("room:leave", { roomId, userName: currentUserName });
+    socket.emit("room:leave", { roomId });
     setLeaveOpen(false);
     onLeaveRoom?.();
   };
 
   return (
-    <div className="min-h-screen text-white bg-[radial-gradient(circle_at_15%_10%,rgba(38,59,122,.35),transparent_38%),linear-gradient(120deg,#070f2d,#1a1c59_60%,#10163f)]">
-      
+    <div className="min-h-screen text-white bg-[#020617]">
+
       <RoomTopBar
         onSetVideo={() => setSetVideoOpen(true)}
         onLeave={() => setLeaveOpen(true)}
@@ -54,16 +94,42 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
         roomName={roomName}
         roomId={roomId}
         watcherCount={users.length}
+        isAdmin={isAdmin}
       />
 
       <main className="grid h-[calc(100vh-72px)] grid-cols-[1fr_320px]">
-        <VideoStage />
-        <ChatPanel users={users} roomId={roomId} roomName={roomName} currentUserName={currentUserName} />
+        <VideoStage videoUrl={videoUrl} />
+
+        <ChatPanel
+          users={users}
+          roomId={roomId}
+          roomName={roomName}
+          currentUserName={currentUserName}
+        />
       </main>
 
-      <SetVideoModal open={setVideoOpen} onClose={() => setSetVideoOpen(false)} />
-      <LeaveRoomModal open={leaveOpen} onClose={() => setLeaveOpen(false)} onConfirm={handleConfirmLeave} />
-      <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} roomId={roomId} />
+      <SetVideoModal
+        open={setVideoOpen}
+        onClose={() => setSetVideoOpen(false)}
+        onSetVideo={(url) => {
+          socket.emit("video:set", {
+            roomId,
+            videoUrl: url,
+          });
+        }}
+      />
+
+      <LeaveRoomModal
+        open={leaveOpen}
+        onClose={() => setLeaveOpen(false)}
+        onConfirm={handleConfirmLeave}
+      />
+
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        roomId={roomId}
+      />
     </div>
   );
 }

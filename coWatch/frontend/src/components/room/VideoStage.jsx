@@ -1,22 +1,52 @@
-import { Play, Wifi } from "lucide-react";
+import { useEffect, useState } from "react";
 
-export default function VideoStage() {
+export default function VideoStage({ videoUrl }) {
+  const [embedUrl, setEmbedUrl] = useState("");
+
+  useEffect(() => {
+    if (!videoUrl) return;
+
+    if (videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be")) {
+      let videoId = "";
+
+      if (videoUrl.includes("youtu.be")) {
+        videoId = videoUrl.split("/").pop();
+      } else if (videoUrl.includes("/live/")) {
+        videoId = videoUrl.split("/live/")[1].split("?")[0];
+      } else {
+        const params = new URL(videoUrl).searchParams;
+        videoId = params.get("v");
+      }
+
+      setEmbedUrl(`https://www.youtube.com/embed/${videoId}`);
+    } else if (videoUrl.includes("drive.google.com")) {
+      const match = videoUrl.match(/\/d\/(.*?)\//);
+      if (match) {
+        setEmbedUrl(`https://drive.google.com/file/d/${match[1]}/preview`);
+      }
+    } else {
+      setEmbedUrl(videoUrl);
+    }
+  }, [videoUrl]);
+
   return (
-    <section className="p-7">
-      <div className="grid h-[72vh] place-items-center rounded-[22px] bg-[#07153a]/80">
-        <div className="text-center">
-          <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-white/10">
-            <Play size={34} className="text-white/60" />
-          </div>
-          <p className="mt-6 text-2xl text-white/45 md:text-base">
-            Upload or select a video to start watching
-          </p>
-        </div>
-      </div>
-
-      <p className="mt-5 flex items-center justify-center gap-2 text-lg text-emerald-400 md:text-sm">
-        <Wifi size={16} /> Connected • Real-time sync active
-      </p>
-    </section>
+    <div className="h-[70vh] flex items-center justify-center bg-black rounded-xl">
+      {!embedUrl ? (
+        <p className="text-white/50">No video selected</p>
+      ) : embedUrl.includes("youtube") || embedUrl.includes("drive") ? (
+        <iframe
+          src={embedUrl}
+          className="w-full h-full rounded-xl"
+          allow="autoplay; encrypted-media"
+          allowFullScreen
+        />
+      ) : (
+        <video
+          src={embedUrl}
+          controls
+          className="w-full h-full rounded-xl"
+        />
+      )}
+    </div>
   );
 }
