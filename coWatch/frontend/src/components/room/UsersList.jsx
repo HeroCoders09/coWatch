@@ -22,7 +22,7 @@ export default function UsersList({
           >
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="h-9 w-9 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 flex items-center justify-center text-black font-bold">
+                <div className="h-9 w-9 rounded-full bg-linear-to-r from-cyan-400 to-fuchsia-500 flex items-center justify-center text-black font-bold">
                   {getInitial(user.userName)}
                 </div>
 
@@ -37,7 +37,7 @@ export default function UsersList({
                 )}
 
                 {user.isAdmin && (
-                  <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-[2px] rounded-full">
+                  <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-0.5 rounded-full">
                     👑 Admin
                   </span>
                 )}

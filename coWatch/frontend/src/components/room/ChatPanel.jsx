@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import {socket} from "../../services/socket";
+import { socket } from "../../services/socket";
 
 export default function ChatPanel({
   users = [],
@@ -15,13 +15,21 @@ export default function ChatPanel({
   );
 
   useEffect(() => {
+    // ✅ replace full list on join/rejoin
+    const handleHistory = (items) => {
+      setMessages(Array.isArray(items) ? items : []);
+    };
+
+    // ✅ append only new incoming message
     const handleMessage = (msg) => {
       setMessages((prev) => [...prev, msg]);
     };
 
+    socket.on("chat:history", handleHistory);
     socket.on("chat:message", handleMessage);
 
     return () => {
+      socket.off("chat:history", handleHistory);
       socket.off("chat:message", handleMessage);
     };
   }, []);
@@ -40,8 +48,6 @@ export default function ChatPanel({
 
   return (
     <div className="flex flex-col h-full bg-[#0b1024] border-l border-white/10">
-
-      {/* Tabs */}
       <div className="flex p-3 border-b border-white/10 gap-2">
         <button
           className={`flex-1 py-2 rounded-lg text-sm transition ${
@@ -66,7 +72,6 @@ export default function ChatPanel({
         </button>
       </div>
 
-      {/* CHAT */}
       {activeTab === "chat" && (
         <>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -79,10 +84,7 @@ export default function ChatPanel({
             {messages.map((msg, idx) => (
               <div key={idx} className="text-sm">
                 <span className="text-cyan-400 font-medium">
-                  {msg.userName === currentUserName
-                    ? "You"
-                    : msg.userName}
-                  :
+                  {msg.userName === currentUserName ? "You" : msg.userName}:
                 </span>{" "}
                 {msg.message}
               </div>
@@ -108,35 +110,24 @@ export default function ChatPanel({
         </>
       )}
 
-      {/* USERS */}
       {activeTab === "users" && (
         <div className="flex-1 p-3 space-y-3 overflow-y-auto">
-
           {users.map((user) => (
             <div
               key={user.userName}
               className="flex items-center justify-between bg-white/5 hover:bg-white/10 transition p-3 rounded-xl"
             >
-              {/* LEFT */}
               <div className="flex items-center gap-3">
-
-                {/* Avatar */}
                 <div className="h-9 w-9 rounded-full bg-gradient-to-r from-cyan-400 to-fuchsia-500 flex items-center justify-center font-bold text-black">
                   {user.userName[0].toUpperCase()}
                 </div>
 
-                {/* Name + tags */}
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
-
-                    <span className="font-medium">
-                      {user.userName}
-                    </span>
+                    <span className="font-medium">{user.userName}</span>
 
                     {user.userName === currentUserName && (
-                      <span className="text-cyan-400 text-xs">
-                        (You)
-                      </span>
+                      <span className="text-cyan-400 text-xs">(You)</span>
                     )}
 
                     {user.isAdmin && (
@@ -148,7 +139,6 @@ export default function ChatPanel({
                 </div>
               </div>
 
-              {/* RIGHT */}
               {isAdmin &&
                 !user.isAdmin &&
                 user.userName !== currentUserName && (
@@ -166,7 +156,6 @@ export default function ChatPanel({
                 )}
             </div>
           ))}
-
         </div>
       )}
     </div>

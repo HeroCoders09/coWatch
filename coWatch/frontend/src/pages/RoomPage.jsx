@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import RoomTopBar from "../components/room/RoomTopBar";
 import VideoStage from "../components/room/VideoStage";
 import ChatPanel from "../components/room/ChatPanel";
 import SetVideoModal from "../components/room/modals/SetVideoModal";
 import LeaveRoomModal from "../components/room/modals/LeaveRoomModal";
 import InviteModal from "../components/room/modals/InviteModal";
-import {socket} from "../services/socket";
+import { socket } from "../services/socket";
 
 export default function RoomPage({ roomData, onLeaveRoom }) {
   const [setVideoOpen, setSetVideoOpen] = useState(false);
@@ -14,61 +14,44 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   const [users, setUsers] = useState([]);
   const [videoUrl, setVideoUrl] = useState("");
 
-  // ✅ ROOM ID
-  const params = new URLSearchParams(window.location.search);
-  const roomId =
-    roomData?.roomId ||
-    params.get("roomId") ||
-    window.location.pathname.split("/").pop() ||
-    "ROOMID";
+  const roomId = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (
+      roomData?.roomId ||
+      params.get("roomId") ||
+      window.location.pathname.split("/").pop() ||
+      "ROOMID"
+    );
+  }, [roomData?.roomId]);
 
-  // 🔥 PERSISTENT USER ID (MAIN FIX)
-  let userId = localStorage.getItem("userId");
-  if (!userId) {
-    userId = Math.random().toString(36).slice(2);
-    localStorage.setItem("userId", userId);
-  }
+  const currentUserName = useMemo(() => {
+    const storedName = localStorage.getItem("username");
+    return roomData?.name || storedName || "Guest";
+  }, [roomData?.name]);
 
-  // ✅ USERNAME persistence
-  const storedName = localStorage.getItem("username");
-  const currentUserName = roomData?.name || storedName || "Guest";
-
-  const roomName =
-    roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
+  const roomName = roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
 
   const isAdmin = users.some(
-    (u) => u.socketId === socket.id && u.isAdmin
+    (u) => u.userName === currentUserName && u.isAdmin
   );
 
   useEffect(() => {
     localStorage.setItem("username", currentUserName);
 
-    const handleUsers = ({ users }) => {
-      setUsers(users || []);
-    };
-
-    const handleVideoUpdate = ({ videoUrl }) => {
-      setVideoUrl(videoUrl);
-    };
+    const handleUsers = ({ users }) => setUsers(users || []);
+    const handleVideoUpdate = ({ videoUrl }) => setVideoUrl(videoUrl);
 
     socket.on("presence:users", handleUsers);
     socket.on("video:update", handleVideoUpdate);
 
-    // 🔥 JOIN FUNCTION (single source)
     const joinRoom = () => {
       socket.emit("room:join", {
         roomId,
         userName: currentUserName,
-        userId, // 🔥 REQUIRED
       });
     };
 
-    // 🔥 join immediately if already connected
-    if (socket.connected) {
-      joinRoom();
-    }
-
-    // 🔥 join on reconnect
+    if (socket.connected) joinRoom();
     socket.on("connect", joinRoom);
 
     return () => {
@@ -86,7 +69,6 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
 
   return (
     <div className="min-h-screen text-white bg-[#020617]">
-
       <RoomTopBar
         onSetVideo={() => setSetVideoOpen(true)}
         onLeave={() => setLeaveOpen(true)}

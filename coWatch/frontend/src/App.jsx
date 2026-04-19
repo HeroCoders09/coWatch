@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Navbar from "./components/layout/Navbar";
 import HeroSection from "./components/sections/HeroSection";
 import FeaturesSection from "./components/sections/FeaturesSection";
@@ -10,16 +10,37 @@ import RoomPage from "./pages/RoomPage";
 import { socket } from "./services/socket";
 import { generateRoomId } from "./utils/room";
 
+const ROOM_STORAGE_KEY = "cowatch_active_room";
+
 export default function App() {
   const [modalMode, setModalMode] = useState(null); // "create" | "join" | null
   const [inRoom, setInRoom] = useState(false);
   const [roomData, setRoomData] = useState(null);
+
+  // ✅ Restore room after refresh
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ROOM_STORAGE_KEY);
+      if (!raw) return;
+
+      const saved = JSON.parse(raw);
+      if (saved?.roomId && saved?.name) {
+        setRoomData(saved);
+        setInRoom(true);
+      }
+    } catch (e) {
+      console.error("Failed to restore room from storage", e);
+      localStorage.removeItem(ROOM_STORAGE_KEY);
+    }
+  }, []);
 
   const handleSuccess = (payload, mode) => {
     if (mode === "create") {
       const roomId = generateRoomId();
       const next = { ...payload, roomId, mode: "create" };
       setRoomData(next);
+      localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(next));
+
       socket.emit("room:create", {
         roomId,
         roomName: payload.roomName,
@@ -28,6 +49,8 @@ export default function App() {
     } else {
       const next = { ...payload, mode: "join" };
       setRoomData(next);
+      localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(next));
+
       socket.emit("room:join", {
         roomId: payload.roomId,
         userName: payload.name,
@@ -38,17 +61,13 @@ export default function App() {
     setInRoom(true);
   };
 
-  if (inRoom) {
+  if (inRoom && roomData) {
     return (
       <RoomPage
         roomData={roomData}
         onLeaveRoom={() => {
-          if (roomData?.roomId) {
-            socket.emit("room:leave", {
-              roomId: roomData.roomId,
-              userName: roomData.name,
-            });
-          }
+          // ❌ Don't emit room:leave here (RoomPage already does it)
+          localStorage.removeItem(ROOM_STORAGE_KEY);
           setInRoom(false);
           setRoomData(null);
         }}
@@ -58,8 +77,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-white bg-[radial-gradient(circle_at_12%_8%,rgba(35,62,128,.45)_0%,transparent_36%),radial-gradient(circle_at_88%_18%,rgba(78,49,146,.32)_0%,transparent_32%),linear-gradient(130deg,#0a1130_0%,#171a56_55%,#0a1438_100%)]">
-      <Navbar onCreateRoom={() => setModalMode("create")} onJoinRoom={() => setModalMode("join")} />
-      <HeroSection onCreateRoom={() => setModalMode("create")} onJoinRoom={() => setModalMode("join")} />
+      <Navbar
+        onCreateRoom={() => setModalMode("create")}
+        onJoinRoom={() => setModalMode("join")}
+      />
+      <HeroSection
+        onCreateRoom={() => setModalMode("create")}
+        onJoinRoom={() => setModalMode("join")}
+      />
       <FeaturesSection />
       <DemoSection />
       <ReadySection onCreateRoom={() => setModalMode("create")} />

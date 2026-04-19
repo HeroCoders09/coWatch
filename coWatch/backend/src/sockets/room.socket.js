@@ -1,6 +1,8 @@
 import { rooms } from "../data/inMemoryStore.js";
+import prisma from "../config/prisma.js";
 
 const roomVideos = new Map();
+const HISTORY_LIMIT = 50;
 
 function emitUsers(io, roomId) {
   const room = rooms.get(roomId);
@@ -19,9 +21,36 @@ function emitUsers(io, roomId) {
   });
 }
 
-export function registerRoomSocket(io, socket) {
+async function saveMessage(roomCode, userName, text) {
+  try {
+    await prisma.chatMessage.create({
+      data: { roomCode, userName, text },
+    });
+  } catch (err) {
+    console.error("[chat] Failed to persist message:", err.message);
+  }
+}
 
-  // 🔹 CREATE ROOM
+async function loadHistory(roomCode) {
+  try {
+    const rows = await prisma.chatMessage.findMany({
+      where: { roomCode },
+      orderBy: { createdAt: "asc" },
+      take: HISTORY_LIMIT,
+    });
+
+    return rows.map((r) => ({
+      userName: r.userName,
+      message: r.text,
+      time: r.createdAt.getTime(),
+    }));
+  } catch (err) {
+    console.error("[chat] Failed to load history:", err.message);
+    return [];
+  }
+}
+
+export function registerRoomSocket(io, socket) {
   socket.on("room:create", ({ roomId, roomName, userName }) => {
     let room = rooms.get(roomId);
 
@@ -31,7 +60,6 @@ export function registerRoomSocket(io, socket) {
         roomName,
         adminUserName: userName,
         users: new Map(),
-        messages: [],
       };
       rooms.set(roomId, room);
     }
@@ -49,14 +77,21 @@ export function registerRoomSocket(io, socket) {
     emitUsers(io, roomId);
   });
 
-  // 🔹 JOIN ROOM
-  socket.on("room:join", ({ roomId, userName }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
+  socket.on("room:join", async ({ roomId, userName }) => {
+    let room = rooms.get(roomId);
+
+    if (!room) {
+      room = {
+        roomId,
+        roomName: `Room-${roomId.slice(0, 4)}`,
+        adminUserName: userName,
+        users: new Map(),
+      };
+      rooms.set(roomId, room);
+    }
 
     socket.join(roomId);
 
-    // overwrite (no duplicates)
     room.users.set(userName, {
       userName,
       socketId: socket.id,
@@ -67,72 +102,52 @@ export function registerRoomSocket(io, socket) {
 
     emitUsers(io, roomId);
 
-    // send current video
     if (roomVideos.has(roomId)) {
-      socket.emit("video:update", {
-        videoUrl: roomVideos.get(roomId),
-      });
+      socket.emit("video:update", { videoUrl: roomVideos.get(roomId) });
     }
 
-    // send old messages (optional)
-    if (room.messages?.length) {
-      room.messages.forEach((msg) => {
-        socket.emit("chat:message", msg);
-      });
-    }
+    // ✅ send all history in one event (prevents duplicate append behavior)
+    const history = await loadHistory(roomId);
+    socket.emit("chat:history", history);
   });
 
-  // 🔹 VIDEO SET (ADMIN ONLY)
   socket.on("video:set", ({ roomId, videoUrl }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
     const currentUser = socket.data.userName;
-
     if (room.adminUserName !== currentUser) return;
 
     roomVideos.set(roomId, videoUrl);
-
     io.to(roomId).emit("video:update", { videoUrl });
   });
 
-  // 🔥 🔹 ADMIN TRANSFER
   socket.on("admin:transfer", ({ roomId, targetUserName }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
     const currentUser = socket.data.userName;
-
     if (!room.users.has(currentUser)) return;
     if (room.adminUserName !== currentUser) return;
     if (!room.users.has(targetUserName)) return;
 
     room.adminUserName = targetUserName;
-
     emitUsers(io, roomId);
   });
 
-  // 🔥 🔹 CHAT MESSAGE (FIXED)
-  socket.on("chat:message", ({ roomId, message, userName }) => {
-    const room = rooms.get(roomId);
-    if (!room) return;
-
-    if (!message || !userName) return;
+  socket.on("chat:message", async ({ roomId, message, userName }) => {
+    if (!message?.trim() || !userName) return;
 
     const msg = {
       userName,
-      message,
+      message: message.trim(),
       time: Date.now(),
     };
 
-    // store messages
-    room.messages.push(msg);
-
-    // broadcast
     io.to(roomId).emit("chat:message", msg);
+    await saveMessage(roomId, userName, message.trim());
   });
 
-  // 🔹 LEAVE ROOM
   socket.on("room:leave", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
@@ -143,7 +158,6 @@ export function registerRoomSocket(io, socket) {
     room.users.delete(userName);
     socket.leave(roomId);
 
-    // admin transfer
     if (wasAdmin && room.users.size > 0) {
       const nextUser = Array.from(room.users.values())[0];
       room.adminUserName = nextUser.userName;
@@ -157,27 +171,19 @@ export function registerRoomSocket(io, socket) {
     }
   });
 
-  // 🔹 DISCONNECT (REFRESH SAFE)
   socket.on("disconnect", () => {
     const roomId = socket.data.roomId;
     const userName = socket.data.userName;
-
     if (!roomId || !userName) return;
-
-    const room = rooms.get(roomId);
-    if (!room) return;
 
     setTimeout(() => {
       const r = rooms.get(roomId);
       if (!r) return;
 
       const user = r.users.get(userName);
-
-      // if reconnected → skip removal
       if (!user || user.socketId !== socket.id) return;
 
       const wasAdmin = r.adminUserName === userName;
-
       r.users.delete(userName);
 
       if (wasAdmin && r.users.size > 0) {
