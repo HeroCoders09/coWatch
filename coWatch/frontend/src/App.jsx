@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Navbar from "./components/layout/Navbar";
 import HeroSection from "./components/sections/HeroSection";
 import FeaturesSection from "./components/sections/FeaturesSection";
@@ -11,13 +11,22 @@ import { socket } from "./services/socket";
 import { generateRoomId } from "./utils/room";
 
 const ROOM_STORAGE_KEY = "cowatch_active_room";
+const CLIENT_ID_KEY = "cowatch_client_id";
 
 export default function App() {
-  const [modalMode, setModalMode] = useState(null); // "create" | "join" | null
+  const [modalMode, setModalMode] = useState(null);
   const [inRoom, setInRoom] = useState(false);
   const [roomData, setRoomData] = useState(null);
 
-  // ✅ Restore room after refresh
+  const clientId = useMemo(() => {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  }, []);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(ROOM_STORAGE_KEY);
@@ -45,6 +54,7 @@ export default function App() {
         roomId,
         roomName: payload.roomName,
         userName: payload.name,
+        clientId, // ✅ added
       });
     } else {
       const next = { ...payload, mode: "join" };
@@ -54,6 +64,7 @@ export default function App() {
       socket.emit("room:join", {
         roomId: payload.roomId,
         userName: payload.name,
+        clientId, // ✅ added
       });
     }
 
@@ -66,7 +77,6 @@ export default function App() {
       <RoomPage
         roomData={roomData}
         onLeaveRoom={() => {
-          // ❌ Don't emit room:leave here (RoomPage already does it)
           localStorage.removeItem(ROOM_STORAGE_KEY);
           setInRoom(false);
           setRoomData(null);

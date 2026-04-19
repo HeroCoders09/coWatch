@@ -7,6 +7,8 @@ import LeaveRoomModal from "../components/room/modals/LeaveRoomModal";
 import InviteModal from "../components/room/modals/InviteModal";
 import { socket } from "../services/socket";
 
+const CLIENT_ID_KEY = "cowatch_client_id";
+
 export default function RoomPage({ roomData, onLeaveRoom }) {
   const [setVideoOpen, setSetVideoOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -29,6 +31,15 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
     return roomData?.name || storedName || "Guest";
   }, [roomData?.name]);
 
+  const clientId = useMemo(() => {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  }, []);
+
   const roomName = roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
 
   const isAdmin = users.some(
@@ -48,6 +59,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
       socket.emit("room:join", {
         roomId,
         userName: currentUserName,
+        clientId,
       });
     };
 
@@ -59,10 +71,10 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
       socket.off("video:update", handleVideoUpdate);
       socket.off("connect", joinRoom);
     };
-  }, [roomId, currentUserName]);
+  }, [roomId, currentUserName, clientId]);
 
   const handleConfirmLeave = () => {
-    socket.emit("room:leave", { roomId });
+    socket.emit("room:leave", { roomId, clientId });
     setLeaveOpen(false);
     onLeaveRoom?.();
   };
@@ -80,8 +92,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
       />
 
       <main className="grid h-[calc(100vh-72px)] grid-cols-[1fr_320px]">
-        <VideoStage videoUrl={videoUrl} />
-
+        <VideoStage videoUrl={videoUrl} roomId={roomId} isAdmin={isAdmin} />
         <ChatPanel
           users={users}
           roomId={roomId}
@@ -94,10 +105,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
         open={setVideoOpen}
         onClose={() => setSetVideoOpen(false)}
         onSetVideo={(url) => {
-          socket.emit("video:set", {
-            roomId,
-            videoUrl: url,
-          });
+          socket.emit("video:set", { roomId, videoUrl: url });
         }}
       />
 

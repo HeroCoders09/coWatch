@@ -2,6 +2,7 @@ import { rooms } from "../data/inMemoryStore.js";
 import prisma from "../config/prisma.js";
 
 const roomVideos = new Map();
+const roomPlayback = new Map(); // roomId -> { isPlaying, positionSec, updatedAt }
 const HISTORY_LIMIT = 50;
 
 function emitUsers(io, roomId) {
@@ -9,9 +10,10 @@ function emitUsers(io, roomId) {
   if (!room) return;
 
   const users = Array.from(room.users.values()).map((u) => ({
+    clientId: u.clientId,
     socketId: u.socketId,
     userName: u.userName,
-    isAdmin: u.userName === room.adminUserName,
+    isAdmin: u.clientId === room.adminClientId,
   }));
 
   io.to(roomId).emit("presence:users", {
@@ -19,6 +21,35 @@ function emitUsers(io, roomId) {
     users,
     count: users.length,
   });
+}
+
+function getPlaybackState(roomId) {
+  const state = roomPlayback.get(roomId) || {
+    isPlaying: false,
+    positionSec: 0,
+    updatedAt: Date.now(),
+  };
+
+  const now = Date.now();
+  let effectivePosition = state.positionSec;
+
+  if (state.isPlaying) {
+    effectivePosition += (now - state.updatedAt) / 1000;
+  }
+
+  return {
+    isPlaying: state.isPlaying,
+    positionSec: Math.max(0, effectivePosition),
+    updatedAt: now,
+  };
+}
+
+function emitPlaybackStateToRoom(io, roomId) {
+  io.to(roomId).emit("video:state", getPlaybackState(roomId));
+}
+
+function emitPlaybackStateToSocket(socket, roomId) {
+  socket.emit("video:state", getPlaybackState(roomId));
 }
 
 async function saveMessage(roomCode, userName, text) {
@@ -38,7 +69,6 @@ async function loadHistory(roomCode) {
       orderBy: { createdAt: "asc" },
       take: HISTORY_LIMIT,
     });
-
     return rows.map((r) => ({
       userName: r.userName,
       message: r.text,
@@ -50,55 +80,63 @@ async function loadHistory(roomCode) {
   }
 }
 
-export function registerRoomSocket(io, socket) {
-  socket.on("room:create", ({ roomId, roomName, userName }) => {
-    let room = rooms.get(roomId);
+function upsertUser(room, { clientId, userName, socketId }) {
+  room.users.set(clientId, { clientId, userName, socketId });
+}
 
+export function registerRoomSocket(io, socket) {
+  socket.on("room:create", ({ roomId, roomName, userName, clientId }) => {
+    if (!roomId || !userName || !clientId) return;
+
+    let room = rooms.get(roomId);
     if (!room) {
       room = {
         roomId,
         roomName,
-        adminUserName: userName,
+        adminClientId: clientId,
         users: new Map(),
       };
       rooms.set(roomId, room);
     }
 
     socket.join(roomId);
-
-    room.users.set(userName, {
-      userName,
-      socketId: socket.id,
-    });
+    upsertUser(room, { clientId, userName, socketId: socket.id });
 
     socket.data.roomId = roomId;
     socket.data.userName = userName;
+    socket.data.clientId = clientId;
 
     emitUsers(io, roomId);
+
+    if (!roomPlayback.has(roomId)) {
+      roomPlayback.set(roomId, {
+        isPlaying: false,
+        positionSec: 0,
+        updatedAt: Date.now(),
+      });
+    }
   });
 
-  socket.on("room:join", async ({ roomId, userName }) => {
-    let room = rooms.get(roomId);
+  socket.on("room:join", async ({ roomId, userName, clientId }) => {
+    if (!roomId || !userName || !clientId) return;
 
+    let room = rooms.get(roomId);
     if (!room) {
       room = {
         roomId,
         roomName: `Room-${roomId.slice(0, 4)}`,
-        adminUserName: userName,
+        adminClientId: clientId,
         users: new Map(),
       };
       rooms.set(roomId, room);
     }
 
     socket.join(roomId);
-
-    room.users.set(userName, {
-      userName,
-      socketId: socket.id,
-    });
+    upsertUser(room, { clientId, userName, socketId: socket.id });
 
     socket.data.roomId = roomId;
     socket.data.userName = userName;
+    socket.data.clientId = clientId;
 
     emitUsers(io, roomId);
 
@@ -106,7 +144,16 @@ export function registerRoomSocket(io, socket) {
       socket.emit("video:update", { videoUrl: roomVideos.get(roomId) });
     }
 
-    // ✅ send all history in one event (prevents duplicate append behavior)
+    if (!roomPlayback.has(roomId)) {
+      roomPlayback.set(roomId, {
+        isPlaying: false,
+        positionSec: 0,
+        updatedAt: Date.now(),
+      });
+    }
+
+    emitPlaybackStateToSocket(socket, roomId);
+
     const history = await loadHistory(roomId);
     socket.emit("chat:history", history);
   });
@@ -115,23 +162,61 @@ export function registerRoomSocket(io, socket) {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const currentUser = socket.data.userName;
-    if (room.adminUserName !== currentUser) return;
+    const currentClientId = socket.data.clientId;
+    if (room.adminClientId !== currentClientId) return;
 
     roomVideos.set(roomId, videoUrl);
+
+    roomPlayback.set(roomId, {
+      isPlaying: false,
+      positionSec: 0,
+      updatedAt: Date.now(),
+    });
+
     io.to(roomId).emit("video:update", { videoUrl });
+    emitPlaybackStateToRoom(io, roomId);
+  });
+
+  socket.on("video:state:update", ({ roomId, isPlaying, positionSec }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const currentClientId = socket.data.clientId;
+    if (room.adminClientId !== currentClientId) return;
+
+    const safePos = Number(positionSec);
+
+    const next = {
+      isPlaying: Boolean(isPlaying),
+      positionSec: Number.isFinite(safePos) && safePos >= 0 ? safePos : 0,
+      updatedAt: Date.now(),
+    };
+
+    roomPlayback.set(roomId, next);
+    io.to(roomId).emit("video:state", next);
+  });
+
+  // ✅ Late-join / player-ready explicit state fetch
+  socket.on("video:state:request", ({ roomId }) => {
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    socket.emit("video:state", getPlaybackState(roomId));
   });
 
   socket.on("admin:transfer", ({ roomId, targetUserName }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const currentUser = socket.data.userName;
-    if (!room.users.has(currentUser)) return;
-    if (room.adminUserName !== currentUser) return;
-    if (!room.users.has(targetUserName)) return;
+    const currentClientId = socket.data.clientId;
+    if (room.adminClientId !== currentClientId) return;
 
-    room.adminUserName = targetUserName;
+    const target = Array.from(room.users.values()).find(
+      (u) => u.userName === targetUserName
+    );
+    if (!target) return;
+
+    room.adminClientId = target.clientId;
     emitUsers(io, roomId);
   });
 
@@ -148,24 +233,26 @@ export function registerRoomSocket(io, socket) {
     await saveMessage(roomId, userName, message.trim());
   });
 
-  socket.on("room:leave", ({ roomId }) => {
+  socket.on("room:leave", ({ roomId, clientId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const userName = socket.data.userName;
-    const wasAdmin = room.adminUserName === userName;
+    const id = clientId || socket.data.clientId;
+    if (!id) return;
 
-    room.users.delete(userName);
+    const wasAdmin = room.adminClientId === id;
+    room.users.delete(id);
     socket.leave(roomId);
 
     if (wasAdmin && room.users.size > 0) {
       const nextUser = Array.from(room.users.values())[0];
-      room.adminUserName = nextUser.userName;
+      room.adminClientId = nextUser.clientId;
     }
 
     if (room.users.size === 0) {
       rooms.delete(roomId);
       roomVideos.delete(roomId);
+      roomPlayback.delete(roomId);
     } else {
       emitUsers(io, roomId);
     }
@@ -173,27 +260,28 @@ export function registerRoomSocket(io, socket) {
 
   socket.on("disconnect", () => {
     const roomId = socket.data.roomId;
-    const userName = socket.data.userName;
-    if (!roomId || !userName) return;
+    const clientId = socket.data.clientId;
+    if (!roomId || !clientId) return;
 
     setTimeout(() => {
       const r = rooms.get(roomId);
       if (!r) return;
 
-      const user = r.users.get(userName);
+      const user = r.users.get(clientId);
       if (!user || user.socketId !== socket.id) return;
 
-      const wasAdmin = r.adminUserName === userName;
-      r.users.delete(userName);
+      const wasAdmin = r.adminClientId === clientId;
+      r.users.delete(clientId);
 
       if (wasAdmin && r.users.size > 0) {
         const nextUser = Array.from(r.users.values())[0];
-        r.adminUserName = nextUser.userName;
+        r.adminClientId = nextUser.clientId;
       }
 
       if (r.users.size === 0) {
         rooms.delete(roomId);
         roomVideos.delete(roomId);
+        roomPlayback.delete(roomId);
       } else {
         emitUsers(io, roomId);
       }
