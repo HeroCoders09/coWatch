@@ -4,8 +4,8 @@ import prisma from "../config/prisma.js";
 const roomVideos = new Map();
 const roomPlayback = new Map(); // roomId -> { isPlaying, positionSec, updatedAt }
 
-// ✅ periodic room sync every 5s
-const RESYNC_INTERVAL_MS = 5000;
+// ✅ periodic room sync every 3s
+const RESYNC_INTERVAL_MS = 3000;
 const HISTORY_PAGE_SIZE = 30;
 let resyncTimerStarted = false;
 

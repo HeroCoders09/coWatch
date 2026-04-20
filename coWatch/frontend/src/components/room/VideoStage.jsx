@@ -6,6 +6,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
   const [kind, setKind] = useState("none"); // none | youtube | drive | native
   const [embedUrl, setEmbedUrl] = useState("");
   const [youtubeId, setYoutubeId] = useState("");
+  const [viewerLocallyPaused, setViewerLocallyPaused] = useState(false);
 
   const videoRef = useRef(null);
   const ytPlayerRef = useRef(null);
@@ -17,6 +18,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
       setKind("none");
       setEmbedUrl("");
       setYoutubeId("");
+      setViewerLocallyPaused(false);
       return;
     }
 
@@ -39,6 +41,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           setKind("youtube");
           setYoutubeId(id);
           setEmbedUrl("");
+          setViewerLocallyPaused(false);
           return;
         }
       }
@@ -49,6 +52,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           setKind("drive");
           setEmbedUrl(`https://drive.google.com/file/d/${match[1]}/preview`);
           setYoutubeId("");
+          setViewerLocallyPaused(false);
           return;
         }
       }
@@ -56,10 +60,12 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
       setKind("native");
       setEmbedUrl(url);
       setYoutubeId("");
+      setViewerLocallyPaused(false);
     } catch {
       setKind("native");
       setEmbedUrl(url);
       setYoutubeId("");
+      setViewerLocallyPaused(false);
     }
   }, [videoUrl]);
 
@@ -82,8 +88,17 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           } catch {}
         }
 
-        if (isPlaying) el.play().catch(() => {});
-        else el.pause();
+        // ✅ viewer local pause should not auto-unpause on resync
+        if (!isAdmin && viewerLocallyPaused) {
+          el.pause();
+        } else {
+          if (isPlaying) {
+            el.play().catch(() => {});
+            if (!isAdmin) setViewerLocallyPaused(false);
+          } else {
+            el.pause();
+          }
+        }
       }
 
       if (kind === "youtube") {
@@ -94,7 +109,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
         }
 
         const now = Date.now();
-        if (now - lastYTApplyAtRef.current < 1500) {
+        if (now - lastYTApplyAtRef.current < 1000) {
           setTimeout(() => (applyingRemoteRef.current = false), 0);
           return;
         }
@@ -104,21 +119,29 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
         const current = p.getCurrentTime ? p.getCurrentTime() : 0;
         const drift = Math.abs((current || 0) - target);
 
-        // Only seek on meaningful drift
-        if (drift > 2.5) {
+        if (drift > 1.0) {
           try {
             p.seekTo(target, true);
           } catch {}
         }
 
-        // Only transition if needed
-        try {
-          if (isPlaying && playerState !== YTState.PLAYING) {
-            p.playVideo();
-          } else if (!isPlaying && playerState === YTState.PLAYING) {
-            p.pauseVideo();
+        // ✅ viewer local pause should not auto-unpause on resync
+        if (!isAdmin && viewerLocallyPaused) {
+          if (playerState === YTState.PLAYING) {
+            try {
+              p.pauseVideo();
+            } catch {}
           }
-        } catch {}
+        } else {
+          try {
+            if (isPlaying && playerState !== YTState.PLAYING) {
+              p.playVideo();
+              if (!isAdmin) setViewerLocallyPaused(false);
+            } else if (!isPlaying && playerState === YTState.PLAYING) {
+              p.pauseVideo();
+            }
+          } catch {}
+        }
 
         lastYTApplyAtRef.current = now;
       }
@@ -130,7 +153,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
 
     socket.on("video:state", handleVideoState);
     return () => socket.off("video:state", handleVideoState);
-  }, [kind]);
+  }, [kind, isAdmin, viewerLocallyPaused]);
 
   const emitState = ({ isPlaying, positionSec }) => {
     if (!roomId || !isAdmin) return;
@@ -143,19 +166,34 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
     });
   };
 
-  // Native: admin can control, viewers read-only
+  // -------- Native controls --------
   const handleNativePlay = () => {
     const el = videoRef.current;
     if (!el) return;
-    if (!isAdmin) return;
-    emitState({ isPlaying: true, positionSec: el.currentTime || 0 });
+
+    if (isAdmin) {
+      emitState({ isPlaying: true, positionSec: el.currentTime || 0 });
+      return;
+    }
+
+    // viewer unpause -> request canonical state and resync
+    if (viewerLocallyPaused) {
+      socket.emit("video:state:request", { roomId });
+      setViewerLocallyPaused(false);
+    }
   };
 
   const handleNativePause = () => {
     const el = videoRef.current;
     if (!el) return;
-    if (!isAdmin) return;
-    emitState({ isPlaying: false, positionSec: el.currentTime || 0 });
+
+    if (isAdmin) {
+      emitState({ isPlaying: false, positionSec: el.currentTime || 0 });
+      return;
+    }
+
+    // viewer local pause only
+    setViewerLocallyPaused(true);
   };
 
   const handleNativeSeeked = () => {
@@ -165,13 +203,13 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
     emitState({ isPlaying: !el.paused, positionSec: el.currentTime || 0 });
   };
 
+  // -------- YouTube controls --------
   const onYouTubeReady = (event) => {
     ytPlayerRef.current = event.target;
     if (roomId) socket.emit("video:state:request", { roomId });
   };
 
   const onYouTubeStateChange = (event) => {
-    if (!isAdmin) return; // viewers cannot control
     if (applyingRemoteRef.current) return;
 
     const p = event.target;
@@ -179,10 +217,21 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
     const YTState = window.YT?.PlayerState || {};
     const pos = p.getCurrentTime ? p.getCurrentTime() : 0;
 
-    if (state === YTState.PLAYING) {
-      emitState({ isPlaying: true, positionSec: pos });
-    } else if (state === YTState.PAUSED) {
-      emitState({ isPlaying: false, positionSec: pos });
+    if (isAdmin) {
+      if (state === YTState.PLAYING) {
+        emitState({ isPlaying: true, positionSec: pos });
+      } else if (state === YTState.PAUSED) {
+        emitState({ isPlaying: false, positionSec: pos });
+      }
+      return;
+    }
+
+    // Viewer behavior: local pause allowed, unpause triggers resync
+    if (state === YTState.PAUSED) {
+      setViewerLocallyPaused(true);
+    } else if (state === YTState.PLAYING && viewerLocallyPaused) {
+      socket.emit("video:state:request", { roomId });
+      setViewerLocallyPaused(false);
     }
   };
 
@@ -224,8 +273,9 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
             height: "100%",
             playerVars: {
               autoplay: 0,
-              controls: isAdmin ? 1 : 0, // viewers read-only
-              disablekb: isAdmin ? 0 : 1,
+              controls: 1, // everyone gets controls
+              disablekb: 0, // everyone gets keyboard controls
+              fs: 1, // everyone can fullscreen
               rel: 0,
               modestbranding: 1,
             },
@@ -237,7 +287,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
         <iframe
           src={embedUrl}
           className="w-full h-full rounded-xl"
-          allow="autoplay; encrypted-media"
+          allow="autoplay; encrypted-media; fullscreen"
           allowFullScreen
           title="drive-player"
         />
@@ -245,7 +295,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
         <video
           ref={videoRef}
           src={embedUrl}
-          controls={isAdmin}
+          controls={true} // everyone gets controls incl fullscreen
           className="w-full h-full rounded-xl"
           onPlay={handleNativePlay}
           onPause={handleNativePause}
