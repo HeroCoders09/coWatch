@@ -88,7 +88,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           } catch {}
         }
 
-        // ✅ viewer local pause should not auto-unpause on resync
+        // viewer local pause should not auto-unpause on resync
         if (!isAdmin && viewerLocallyPaused) {
           el.pause();
         } else {
@@ -125,7 +125,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           } catch {}
         }
 
-        // ✅ viewer local pause should not auto-unpause on resync
+        // viewer local pause should not auto-unpause on resync
         if (!isAdmin && viewerLocallyPaused) {
           if (playerState === YTState.PLAYING) {
             try {

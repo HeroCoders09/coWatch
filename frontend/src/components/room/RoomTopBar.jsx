@@ -9,7 +9,7 @@ export default function RoomTopBar({
   roomName = "Room",
   roomId = "ROOMID",
   watcherCount = 1,
-  isAdmin = false, // ✅ ADD THIS
+  isAdmin = false, 
 }) {
   const [copied, setCopied] = useState(false);
 
