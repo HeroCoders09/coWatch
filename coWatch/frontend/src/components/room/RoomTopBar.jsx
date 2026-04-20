@@ -29,7 +29,7 @@ export default function RoomTopBar({
       {/* LEFT */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 pr-4">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500">
             <Video size={16} />
           </div>
           <span className="text-2xl font-bold text-sky-300">CoWatch</span>
@@ -70,14 +70,14 @@ export default function RoomTopBar({
 
         <button
           onClick={onSetVideo}
-          className="inline-flex items-center gap-1 rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold"
+          className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold"
         >
           <Video size={14} /> Set Video
         </button>
 
         <button
           onClick={onLeave}
-          className="inline-flex items-center gap-1 rounded-xl bg-gradient-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold"
+          className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold"
         >
           <LogOut size={14} /> Leave
         </button>

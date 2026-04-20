@@ -5,6 +5,10 @@ const roomVideos = new Map();
 const roomPlayback = new Map(); // roomId -> { isPlaying, positionSec, updatedAt }
 const HISTORY_LIMIT = 50;
 
+// ✅ Step 4: periodic room sync every 5s
+const RESYNC_INTERVAL_MS = 5000;
+let resyncTimerStarted = false;
+
 function emitUsers(io, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -52,6 +56,20 @@ function emitPlaybackStateToSocket(socket, roomId) {
   socket.emit("video:state", getPlaybackState(roomId));
 }
 
+// ✅ start one global periodic broadcaster
+function ensureResyncTimer(io) {
+  if (resyncTimerStarted) return;
+  resyncTimerStarted = true;
+
+  setInterval(() => {
+    for (const [roomId, room] of rooms.entries()) {
+      if (!room || room.users.size === 0) continue;
+      if (!roomVideos.has(roomId)) continue; // only rooms with a selected video
+      emitPlaybackStateToRoom(io, roomId);
+    }
+  }, RESYNC_INTERVAL_MS);
+}
+
 async function saveMessage(roomCode, userName, text) {
   try {
     await prisma.chatMessage.create({
@@ -85,6 +103,9 @@ function upsertUser(room, { clientId, userName, socketId }) {
 }
 
 export function registerRoomSocket(io, socket) {
+  // ✅ ensure timer started once
+  ensureResyncTimer(io);
+
   socket.on("room:create", ({ roomId, roomName, userName, clientId }) => {
     if (!roomId || !userName || !clientId) return;
 
@@ -196,7 +217,6 @@ export function registerRoomSocket(io, socket) {
     io.to(roomId).emit("video:state", next);
   });
 
-  // ✅ Late-join / player-ready explicit state fetch
   socket.on("video:state:request", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;

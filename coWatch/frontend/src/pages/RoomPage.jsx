@@ -82,7 +82,10 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   return (
     <div className="min-h-screen text-white bg-[#020617]">
       <RoomTopBar
-        onSetVideo={() => setSetVideoOpen(true)}
+        onSetVideo={() => {
+          if (!isAdmin) return;
+          setSetVideoOpen(true);
+        }}
         onLeave={() => setLeaveOpen(true)}
         onInvite={() => setInviteOpen(true)}
         roomName={roomName}
@@ -102,9 +105,10 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
       </main>
 
       <SetVideoModal
-        open={setVideoOpen}
+        open={setVideoOpen && isAdmin}
         onClose={() => setSetVideoOpen(false)}
         onSetVideo={(url) => {
+          if (!isAdmin) return;
           socket.emit("video:set", { roomId, videoUrl: url });
         }}
       />
