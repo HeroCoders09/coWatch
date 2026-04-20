@@ -3,10 +3,10 @@ import prisma from "../config/prisma.js";
 
 const roomVideos = new Map();
 const roomPlayback = new Map(); // roomId -> { isPlaying, positionSec, updatedAt }
-const HISTORY_LIMIT = 50;
 
-// ✅ Step 4: periodic room sync every 5s
+// ✅ periodic room sync every 5s
 const RESYNC_INTERVAL_MS = 5000;
+const HISTORY_PAGE_SIZE = 30;
 let resyncTimerStarted = false;
 
 function emitUsers(io, roomId) {
@@ -24,6 +24,23 @@ function emitUsers(io, roomId) {
     roomId,
     users,
     count: users.length,
+  });
+}
+
+function emitRoomMetaToRoom(io, roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  io.to(roomId).emit("room:meta", {
+    roomId: room.roomId,
+    roomName: room.roomName,
+  });
+}
+
+function emitRoomMetaToSocket(socket, room) {
+  if (!room) return;
+  socket.emit("room:meta", {
+    roomId: room.roomId,
+    roomName: room.roomName,
   });
 }
 
@@ -56,7 +73,6 @@ function emitPlaybackStateToSocket(socket, roomId) {
   socket.emit("video:state", getPlaybackState(roomId));
 }
 
-// ✅ start one global periodic broadcaster
 function ensureResyncTimer(io) {
   if (resyncTimerStarted) return;
   resyncTimerStarted = true;
@@ -64,7 +80,7 @@ function ensureResyncTimer(io) {
   setInterval(() => {
     for (const [roomId, room] of rooms.entries()) {
       if (!room || room.users.size === 0) continue;
-      if (!roomVideos.has(roomId)) continue; // only rooms with a selected video
+      if (!roomVideos.has(roomId)) continue;
       emitPlaybackStateToRoom(io, roomId);
     }
   }, RESYNC_INTERVAL_MS);
@@ -80,21 +96,57 @@ async function saveMessage(roomCode, userName, text) {
   }
 }
 
-async function loadHistory(roomCode) {
+function mapRows(rows) {
+  return rows.map((r) => ({
+    id: r.id,
+    userName: r.userName,
+    message: r.text,
+    time: r.createdAt.getTime(),
+  }));
+}
+
+async function loadLatestHistory(roomCode, limit = HISTORY_PAGE_SIZE) {
   try {
-    const rows = await prisma.chatMessage.findMany({
+    const rowsDesc = await prisma.chatMessage.findMany({
       where: { roomCode },
-      orderBy: { createdAt: "asc" },
-      take: HISTORY_LIMIT,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit,
     });
-    return rows.map((r) => ({
-      userName: r.userName,
-      message: r.text,
-      time: r.createdAt.getTime(),
-    }));
+
+    const rowsAsc = [...rowsDesc].reverse();
+    const hasMore = rowsDesc.length === limit;
+    const nextCursor = hasMore ? rowsAsc[0]?.id ?? null : null;
+
+    return { items: mapRows(rowsAsc), hasMore, nextCursor };
   } catch (err) {
-    console.error("[chat] Failed to load history:", err.message);
-    return [];
+    console.error("[chat] Failed to load latest history:", err.message);
+    return { items: [], hasMore: false, nextCursor: null };
+  }
+}
+
+async function loadOlderHistory(roomCode, beforeId, limit = HISTORY_PAGE_SIZE) {
+  try {
+    if (beforeId === null || beforeId === undefined) {
+      return { items: [], hasMore: false, nextCursor: null };
+    }
+
+    const rowsDesc = await prisma.chatMessage.findMany({
+      where: {
+        roomCode,
+        id: { lt: beforeId },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit,
+    });
+
+    const rowsAsc = [...rowsDesc].reverse();
+    const hasMore = rowsDesc.length === limit;
+    const nextCursor = hasMore ? rowsAsc[0]?.id ?? null : null;
+
+    return { items: mapRows(rowsAsc), hasMore, nextCursor };
+  } catch (err) {
+    console.error("[chat] Failed to load older history:", err.message);
+    return { items: [], hasMore: false, nextCursor: null };
   }
 }
 
@@ -103,7 +155,6 @@ function upsertUser(room, { clientId, userName, socketId }) {
 }
 
 export function registerRoomSocket(io, socket) {
-  // ✅ ensure timer started once
   ensureResyncTimer(io);
 
   socket.on("room:create", ({ roomId, roomName, userName, clientId }) => {
@@ -113,7 +164,7 @@ export function registerRoomSocket(io, socket) {
     if (!room) {
       room = {
         roomId,
-        roomName,
+        roomName: roomName?.trim() || `Room-${roomId.slice(0, 4)}`,
         adminClientId: clientId,
         users: new Map(),
       };
@@ -128,6 +179,7 @@ export function registerRoomSocket(io, socket) {
     socket.data.clientId = clientId;
 
     emitUsers(io, roomId);
+    emitRoomMetaToRoom(io, roomId);
 
     if (!roomPlayback.has(roomId)) {
       roomPlayback.set(roomId, {
@@ -139,7 +191,6 @@ export function registerRoomSocket(io, socket) {
   });
 
   socket.on("room:join", async ({ roomId, userName, clientId }) => {
-    console.log("[room:join]", { roomId, userName, clientId, sid: socket.id });
     if (!roomId || !userName || !clientId) return;
 
     let room = rooms.get(roomId);
@@ -161,6 +212,7 @@ export function registerRoomSocket(io, socket) {
     socket.data.clientId = clientId;
 
     emitUsers(io, roomId);
+    emitRoomMetaToSocket(socket, room);
 
     if (roomVideos.has(roomId)) {
       socket.emit("video:update", { videoUrl: roomVideos.get(roomId) });
@@ -176,8 +228,14 @@ export function registerRoomSocket(io, socket) {
 
     emitPlaybackStateToSocket(socket, roomId);
 
-    const history = await loadHistory(roomId);
-    socket.emit("chat:history", history);
+    const page = await loadLatestHistory(roomId);
+    socket.emit("chat:history", page);
+  });
+
+  socket.on("chat:history:more", async ({ roomId, beforeId }) => {
+    if (!roomId) return;
+    const page = await loadOlderHistory(roomId, beforeId);
+    socket.emit("chat:history:more", page);
   });
 
   socket.on("video:set", ({ roomId, videoUrl }) => {
@@ -188,7 +246,6 @@ export function registerRoomSocket(io, socket) {
     if (room.adminClientId !== currentClientId) return;
 
     roomVideos.set(roomId, videoUrl);
-
     roomPlayback.set(roomId, {
       isPlaying: false,
       positionSec: 0,
@@ -207,7 +264,6 @@ export function registerRoomSocket(io, socket) {
     if (room.adminClientId !== currentClientId) return;
 
     const safePos = Number(positionSec);
-
     const next = {
       isPlaying: Boolean(isPlaying),
       positionSec: Number.isFinite(safePos) && safePos >= 0 ? safePos : 0,
@@ -221,7 +277,6 @@ export function registerRoomSocket(io, socket) {
   socket.on("video:state:request", ({ roomId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
-
     socket.emit("video:state", getPlaybackState(roomId));
   });
 
@@ -244,14 +299,14 @@ export function registerRoomSocket(io, socket) {
   socket.on("chat:message", async ({ roomId, message, userName }) => {
     if (!message?.trim() || !userName) return;
 
-    const msg = {
-      userName,
-      message: message.trim(),
-      time: Date.now(),
-    };
+    const trimmed = message.trim();
+    await saveMessage(roomId, userName, trimmed);
 
-    io.to(roomId).emit("chat:message", msg);
-    await saveMessage(roomId, userName, message.trim());
+    io.to(roomId).emit("chat:message", {
+      userName,
+      message: trimmed,
+      time: Date.now(),
+    });
   });
 
   socket.on("room:leave", ({ roomId, clientId }) => {

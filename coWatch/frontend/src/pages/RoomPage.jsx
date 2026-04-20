@@ -15,6 +15,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [users, setUsers] = useState([]);
   const [videoUrl, setVideoUrl] = useState("");
+  const [liveRoomName, setLiveRoomName] = useState(roomData?.roomName || "");
 
   const roomId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -40,20 +41,23 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
     return id;
   }, []);
 
-  const roomName = roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
+  const roomName =
+    liveRoomName || roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
 
-  const isAdmin = users.some(
-    (u) => u.clientId === clientId && u.isAdmin
-  );
+  const isAdmin = users.some((u) => u.clientId === clientId && u.isAdmin);
 
   useEffect(() => {
     localStorage.setItem("username", currentUserName);
 
     const handleUsers = ({ users }) => setUsers(users || []);
     const handleVideoUpdate = ({ videoUrl }) => setVideoUrl(videoUrl);
+    const handleRoomMeta = ({ roomName }) => {
+      if (roomName) setLiveRoomName(roomName);
+    };
 
     socket.on("presence:users", handleUsers);
     socket.on("video:update", handleVideoUpdate);
+    socket.on("room:meta", handleRoomMeta);
 
     const joinRoom = () => {
       socket.emit("room:join", {
@@ -69,6 +73,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
     return () => {
       socket.off("presence:users", handleUsers);
       socket.off("video:update", handleVideoUpdate);
+      socket.off("room:meta", handleRoomMeta);
       socket.off("connect", joinRoom);
     };
   }, [roomId, currentUserName, clientId]);
@@ -80,7 +85,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   };
 
   return (
-    <div className="min-h-screen text-white bg-[#020617]">
+    <div className="h-screen overflow-hidden text-white bg-[#020617]">
       <RoomTopBar
         onSetVideo={() => {
           if (!isAdmin) return;
@@ -94,14 +99,19 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
         isAdmin={isAdmin}
       />
 
-      <main className="grid h-[calc(100vh-72px)] grid-cols-[1fr_320px]">
-        <VideoStage videoUrl={videoUrl} roomId={roomId} isAdmin={isAdmin} />
-        <ChatPanel
-          users={users}
-          roomId={roomId}
-          roomName={roomName}
-          currentUserName={currentUserName}
-        />
+      <main className="grid h-[calc(100vh-72px)] min-h-0 min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-h-0 min-w-0 overflow-hidden">
+          <VideoStage videoUrl={videoUrl} roomId={roomId} isAdmin={isAdmin} />
+        </div>
+
+        <div className="min-h-0 min-w-0 border-l border-white/10">
+          <ChatPanel
+            users={users}
+            roomId={roomId}
+            roomName={roomName}
+            currentUserName={currentUserName}
+          />
+        </div>
       </main>
 
       <SetVideoModal
