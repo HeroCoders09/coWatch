@@ -17,6 +17,7 @@ export default function App() {
   const [modalMode, setModalMode] = useState(null);
   const [inRoom, setInRoom] = useState(false);
   const [roomData, setRoomData] = useState(null);
+  const [prefillRoomId, setPrefillRoomId] = useState("");
 
   const clientId = useMemo(() => {
     let id = localStorage.getItem(CLIENT_ID_KEY);
@@ -27,6 +28,7 @@ export default function App() {
     return id;
   }, []);
 
+  // restore active room
   useEffect(() => {
     try {
       const raw = localStorage.getItem(ROOM_STORAGE_KEY);
@@ -43,6 +45,17 @@ export default function App() {
     }
   }, []);
 
+  // auto-open join modal if invite param exists: /?join=ROOMID
+  useEffect(() => {
+    if (inRoom) return;
+    const params = new URLSearchParams(window.location.search);
+    const joinId = params.get("join");
+    if (joinId) {
+      setPrefillRoomId(joinId.toUpperCase());
+      setModalMode("join");
+    }
+  }, [inRoom]);
+
   const handleSuccess = (payload, mode) => {
     if (mode === "create") {
       const roomId = generateRoomId();
@@ -54,18 +67,25 @@ export default function App() {
         roomId,
         roomName: payload.roomName,
         userName: payload.name,
-        clientId, // ✅ added
+        clientId,
       });
+
+      // keep URL shareable
+      window.history.replaceState({}, "", `/?join=${encodeURIComponent(roomId)}`);
     } else {
-      const next = { ...payload, mode: "join" };
+      const normalizedRoomId = payload.roomId.toUpperCase();
+      const next = { ...payload, roomId: normalizedRoomId, mode: "join" };
       setRoomData(next);
       localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(next));
 
       socket.emit("room:join", {
-        roomId: payload.roomId,
+        roomId: normalizedRoomId,
         userName: payload.name,
-        clientId, // ✅ added
+        clientId,
       });
+
+      // normalize URL
+      window.history.replaceState({}, "", `/?join=${encodeURIComponent(normalizedRoomId)}`);
     }
 
     setModalMode(null);
@@ -80,6 +100,9 @@ export default function App() {
           localStorage.removeItem(ROOM_STORAGE_KEY);
           setInRoom(false);
           setRoomData(null);
+          setPrefillRoomId("");
+          // clear invite query when leaving
+          window.history.replaceState({}, "", "/");
         }}
       />
     );
@@ -105,6 +128,7 @@ export default function App() {
         mode={modalMode || "create"}
         onClose={() => setModalMode(null)}
         onSuccess={handleSuccess}
+        prefillRoomId={prefillRoomId}
       />
     </div>
   );

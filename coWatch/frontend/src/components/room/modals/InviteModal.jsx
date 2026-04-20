@@ -1,14 +1,13 @@
 import { useMemo, useState } from "react";
-import { X, Link2, Copy, Check, Mail } from "lucide-react";
+import { Link2, Copy, Check, Mail } from "lucide-react";
 import ModalShell from "./ModalShell";
 
 export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
   const [copied, setCopied] = useState(false);
 
   const inviteLink = useMemo(() => {
-    // frontend-only link
     const base = window.location.origin;
-    return `${base}/join/${roomId}`;
+    return `${base}/?join=${encodeURIComponent(roomId)}`;
   }, [roomId]);
 
   const copyLink = async () => {
@@ -17,7 +16,7 @@ export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      // no-op fallback for now
+      // no-op
     }
   };
 
@@ -58,18 +57,25 @@ export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
       </p>
 
       <label className="mb-2 block text-sm text-white/80">Room Invite Link</label>
-      <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/4 p-2">
-        <div className="flex min-h-10.5 flex-1 items-center gap-2 rounded-lg bg-black/20 px-3">
-          <Link2 size={16} className="text-cyan-300" />
-          <span className="truncate text-sm text-white/90">{inviteLink}</span>
+
+      {/* FIXED ROW */}
+      <div className="w-full overflow-hidden rounded-xl border border-white/15 bg-white/4 p-2">
+        <div className="flex w-full items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-black/20 px-3 py-2.5">
+            <Link2 size={16} className="shrink-0 text-cyan-300" />
+            <span className="block min-w-0 truncate text-sm text-white/90">
+              {inviteLink}
+            </span>
+          </div>
+
+          <button
+            onClick={copyLink}
+            className="shrink-0 inline-flex h-10.5 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm text-white hover:bg-white/15"
+          >
+            {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
+            {copied ? "Copied" : "Copy"}
+          </button>
         </div>
-        <button
-          onClick={copyLink}
-          className="inline-flex h-10.5 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm text-white hover:bg-white/15"
-        >
-          {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
-          {copied ? "Copied" : "Copy"}
-        </button>
       </div>
 
       <div className="mt-4">

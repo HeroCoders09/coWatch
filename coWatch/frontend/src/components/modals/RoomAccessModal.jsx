@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, User, Video } from "lucide-react";
 
 function Field({ label, icon, placeholder, value, onChange, type = "text" }) {
@@ -19,12 +19,23 @@ function Field({ label, icon, placeholder, value, onChange, type = "text" }) {
   );
 }
 
-function RoomAccessModalContent({ mode = "create", onClose, onSuccess }) {
+function RoomAccessModalContent({
+  mode = "create",
+  onClose,
+  onSuccess,
+  prefillRoomId = "",
+}) {
   const isCreate = mode === "create";
 
   const [name, setName] = useState("");
-  const [roomNameOrId, setRoomNameOrId] = useState("");
+  const [roomNameOrId, setRoomNameOrId] = useState(
+    isCreate ? "" : prefillRoomId
+  );
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isCreate) setRoomNameOrId(prefillRoomId || "");
+  }, [isCreate, prefillRoomId]);
 
   const handleSubmit = () => {
     if (!name.trim() || !roomNameOrId.trim()) {
@@ -79,7 +90,6 @@ function RoomAccessModalContent({ mode = "create", onClose, onSuccess }) {
               value={roomNameOrId}
               onChange={setRoomNameOrId}
             />
-
             {error ? <p className="text-sm text-rose-400">{error}</p> : null}
           </div>
 
@@ -108,14 +118,16 @@ export default function RoomAccessModal({
   mode = "create",
   onClose,
   onSuccess,
+  prefillRoomId = "",
 }) {
   if (!open) return null;
   return (
     <RoomAccessModalContent
-      key={`${mode}-${open ? "open" : "closed"}`}
+      key={`${mode}-${open ? "open" : "closed"}-${prefillRoomId}`}
       mode={mode}
       onClose={onClose}
       onSuccess={onSuccess}
+      prefillRoomId={prefillRoomId}
     />
   );
 }
