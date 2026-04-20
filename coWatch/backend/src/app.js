@@ -1,13 +1,31 @@
 import express from "express";
 import cors from "cors";
-import { env } from "./config/env.js";
-import healthRoutes from "./routes/health.routes.js";
 
 const app = express();
 
-app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
+const envOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const defaultOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
-app.use("/api/health", healthRoutes);
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
 
 export default app;

@@ -139,6 +139,7 @@ export function registerRoomSocket(io, socket) {
   });
 
   socket.on("room:join", async ({ roomId, userName, clientId }) => {
+    console.log("[room:join]", { roomId, userName, clientId, sid: socket.id });
     if (!roomId || !userName || !clientId) return;
 
     let room = rooms.get(roomId);

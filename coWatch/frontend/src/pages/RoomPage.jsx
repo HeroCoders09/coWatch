@@ -43,7 +43,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   const roomName = roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
 
   const isAdmin = users.some(
-    (u) => u.userName === currentUserName && u.isAdmin
+    (u) => u.clientId === clientId && u.isAdmin
   );
 
   useEffect(() => {
