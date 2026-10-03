@@ -3,7 +3,62 @@ import YouTube from "react-youtube";
 import { Play } from "lucide-react";
 import { socket } from "../../services/socket";
 
-export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
+// ---- Google Drive ----------------------------------------------------------
+// Drive's /preview iframe is a cross-origin player we can't control, so it can
+// never be synced. Instead we stream the file into a normal <video> element.
+// If VITE_DRIVE_API_KEY is set we use the official Drive API (most reliable);
+// otherwise the public download endpoint. If neither works the player falls
+// back to the iframe (watchable, but not synced).
+const DRIVE_API_KEY = import.meta.env.VITE_DRIVE_API_KEY;
+
+function extractDriveId(url) {
+  if (!url || !url.includes("drive.google.com")) return "";
+  const m = url.match(/\/d\/([\w-]+)/) || url.match(/[?&]id=([\w-]+)/);
+  return m?.[1] || "";
+}
+
+const driveStreamUrl = (id) =>
+  DRIVE_API_KEY
+    ? `https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${DRIVE_API_KEY}`
+    : `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
+
+// Pulls the video id out of the YouTube link shapes people actually paste:
+// watch?v=, youtu.be/, /shorts/, /embed/, /live/, music.youtube.com, m.youtube.com.
+// (A start time like &t=90 is ignored on purpose: the room's shared position decides where playback starts.)
+function extractYouTubeId(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "";
+  }
+  const host = u.hostname.replace(/^(www|m|music)\./, "");
+  const parts = u.pathname.split("/").filter(Boolean);
+
+  let id = "";
+  if (host === "youtu.be") {
+    id = parts[0] || "";
+  } else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    if (parts[0] === "watch") id = u.searchParams.get("v") || "";
+    else if (["shorts", "embed", "live", "v"].includes(parts[0])) id = parts[1] || "";
+  }
+  // YouTube ids are always 11 characters
+  return /^[\w-]{11}$/.test(id) ? id : "";
+}
+
+const drivePreviewUrl = (id) => `https://drive.google.com/file/d/${id}/preview`;
+
+export default function VideoStage({
+  videoUrl,
+  roomId,
+  isAdmin,
+  canControl,
+  onSetVideo,
+}) {
+  // Who drives playback: the admin, or everyone while the admin has shared control.
+  // Everyone else follows the room (and may pause locally).
+  const canDrive = Boolean(canControl ?? isAdmin);
+
   const [kind, setKind] = useState("none"); // none | youtube | drive | native
   const [embedUrl, setEmbedUrl] = useState("");
   const [youtubeId, setYoutubeId] = useState("");
@@ -11,6 +66,8 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
   // browsers block play() until the page has had a user gesture; when that
   // happens we show a "tap to join" overlay instead of a silently stuck video
   const [needsTap, setNeedsTap] = useState(false);
+  // the Drive URL that failed to stream; for that URL we use the iframe instead
+  const [driveFailedFor, setDriveFailedFor] = useState("");
 
   const videoRef = useRef(null);
   const ytPlayerRef = useRef(null);
@@ -19,6 +76,25 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
   const lastServerStateRef = useRef(null); // { isPlaying, positionSec, at }
   const ytAutoplayCheckRef = useRef(null);
 
+  // The pause flag drives sync decisions, so it lives in a ref: handlers that
+  // run between a state change and the next render must not see a stale value.
+  // (The useState copy is only for the "Paused for you" pill.)
+  const locallyPausedRef = useRef(false);
+  const setLocalPause = (v) => {
+    locallyPausedRef.current = v;
+    setViewerLocallyPaused(v);
+  };
+
+  // When *we* pause/play the player to follow the room, the player fires its
+  // own pause/play event a moment later. That event must not be mistaken for
+  // the viewer pressing pause, so programmatic changes open a short window
+  // in which viewer pause/play events are ignored.
+  const ignoreMediaEventsUntilRef = useRef(0);
+  const markProgrammatic = () => {
+    ignoreMediaEventsUntilRef.current = Date.now() + 800;
+  };
+  const isProgrammatic = () => Date.now() < ignoreMediaEventsUntilRef.current;
+
   useEffect(() => {
     setNeedsTap(false);
     lastServerStateRef.current = null;
@@ -26,61 +102,57 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
 
   useEffect(() => () => clearTimeout(ytAutoplayCheckRef.current), []);
 
+  // switching between follower and controller starts from a clean slate
+  useEffect(() => {
+    setLocalPause(false);
+  }, [canDrive]);
+
   useEffect(() => {
     if (!videoUrl || !videoUrl.trim()) {
       setKind("none");
       setEmbedUrl("");
       setYoutubeId("");
-      setViewerLocallyPaused(false);
+      setLocalPause(false);
       return;
     }
 
     const url = videoUrl.trim();
 
     try {
-      if (url.includes("youtube.com") || url.includes("youtu.be")) {
-        let id = "";
-
-        if (url.includes("youtu.be/")) {
-          id = url.split("youtu.be/")[1]?.split("?")[0] || "";
-        } else if (url.includes("/live/")) {
-          id = url.split("/live/")[1]?.split("?")[0] || "";
-        } else {
-          const params = new URL(url).searchParams;
-          id = params.get("v") || "";
-        }
-
-        if (id) {
-          setKind("youtube");
-          setYoutubeId(id);
-          setEmbedUrl("");
-          setViewerLocallyPaused(false);
-          return;
-        }
+      const ytId = extractYouTubeId(url);
+      if (ytId) {
+        setKind("youtube");
+        setYoutubeId(ytId);
+        setEmbedUrl("");
+        setLocalPause(false);
+        return;
       }
 
-      if (url.includes("drive.google.com")) {
-        const match = url.match(/\/d\/(.*?)\//);
-        if (match?.[1]) {
+      const driveId = extractDriveId(url);
+      if (driveId) {
+        if (driveFailedFor === videoUrl) {
           setKind("drive");
-          setEmbedUrl(`https://drive.google.com/file/d/${match[1]}/preview`);
-          setYoutubeId("");
-          setViewerLocallyPaused(false);
-          return;
+          setEmbedUrl(drivePreviewUrl(driveId));
+        } else {
+          setKind("native");
+          setEmbedUrl(driveStreamUrl(driveId));
         }
+        setYoutubeId("");
+        setLocalPause(false);
+        return;
       }
 
       setKind("native");
       setEmbedUrl(url);
       setYoutubeId("");
-      setViewerLocallyPaused(false);
+      setLocalPause(false);
     } catch {
       setKind("native");
       setEmbedUrl(url);
       setYoutubeId("");
-      setViewerLocallyPaused(false);
+      setLocalPause(false);
     }
-  }, [videoUrl]);
+  }, [videoUrl, driveFailedFor]);
 
   useEffect(() => {
     const handleVideoState = ({ isPlaying, positionSec }) => {
@@ -101,23 +173,27 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
 
         const drift = Math.abs((el.currentTime || 0) - target);
         if (drift > 0.7) {
+          markProgrammatic();
           try {
             el.currentTime = target;
-          } catch {}
+          } catch {
+            /* the player may not be ready yet; the next state update retries */
+          }
         }
 
         // viewer local pause should not auto-unpause on resync
-        if (!isAdmin && viewerLocallyPaused) {
-          el.pause();
-        } else {
-          if (isPlaying) {
+        if (!canDrive && locallyPausedRef.current) {
+          if (!el.paused) el.pause();
+        } else if (isPlaying) {
+          if (el.paused) {
+            markProgrammatic();
             el.play().catch((err) => {
               if (err?.name === "NotAllowedError") setNeedsTap(true);
             });
-            if (!isAdmin) setViewerLocallyPaused(false);
-          } else {
-            el.pause();
           }
+        } else if (!el.paused) {
+          markProgrammatic();
+          el.pause();
         }
       }
 
@@ -140,23 +216,28 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
         const drift = Math.abs((current || 0) - target);
 
         if (drift > 1.0) {
+          markProgrammatic();
           try {
             p.seekTo(target, true);
-          } catch {}
+          } catch {
+            /* the player may not be ready yet; the next state update retries */
+          }
         }
 
         // viewer local pause should not auto-unpause on resync
-        if (!isAdmin && viewerLocallyPaused) {
+        if (!canDrive && locallyPausedRef.current) {
           if (playerState === YTState.PLAYING) {
             try {
               p.pauseVideo();
-            } catch {}
+            } catch {
+            /* the player may not be ready yet; the next state update retries */
+          }
           }
         } else {
           try {
             if (isPlaying && playerState !== YTState.PLAYING) {
+              markProgrammatic();
               p.playVideo();
-              if (!isAdmin) setViewerLocallyPaused(false);
 
               // YouTube gives no error when autoplay is blocked, so check
               // shortly after whether it actually started
@@ -170,9 +251,12 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
                 }
               }, 1500);
             } else if (!isPlaying && playerState === YTState.PLAYING) {
+              markProgrammatic();
               p.pauseVideo();
             }
-          } catch {}
+          } catch {
+            /* the player may not be ready yet; the next state update retries */
+          }
         }
 
         lastYTApplyAtRef.current = now;
@@ -185,10 +269,10 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
 
     socket.on("video:state", handleVideoState);
     return () => socket.off("video:state", handleVideoState);
-  }, [kind, isAdmin, viewerLocallyPaused]);
+  }, [kind, canDrive]);
 
   const emitState = ({ isPlaying, positionSec }) => {
-    if (!roomId || !isAdmin) return;
+    if (!roomId || !canDrive) return;
     if (applyingRemoteRef.current) return;
 
     socket.emit("video:state:update", {
@@ -204,15 +288,20 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
     if (!el) return;
     setNeedsTap(false);
 
-    if (isAdmin) {
+    if (canDrive) {
+      // our own play() to follow the room must not be echoed back to everyone
+      if (isProgrammatic()) return;
       emitState({ isPlaying: true, positionSec: el.currentTime || 0 });
       return;
     }
 
+    // our own play() to follow the room is not the viewer pressing play
+    if (isProgrammatic()) return;
+
     // viewer unpause -> request canonical state and resync
-    if (viewerLocallyPaused) {
+    if (locallyPausedRef.current) {
       socket.emit("video:state:request", { roomId });
-      setViewerLocallyPaused(false);
+      setLocalPause(false);
     }
   };
 
@@ -220,19 +309,37 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
     const el = videoRef.current;
     if (!el) return;
 
-    if (isAdmin) {
+    if (canDrive) {
+      if (isProgrammatic()) return;
       emitState({ isPlaying: false, positionSec: el.currentTime || 0 });
       return;
     }
 
+    // pause caused by following the room is not a viewer pause
+    if (isProgrammatic()) return;
+
     // viewer local pause only
-    setViewerLocallyPaused(true);
+    setLocalPause(true);
+  };
+
+  // a Drive file that can't be streamed (private, too large, quota hit,
+  // unsupported format) drops back to the iframe preview
+  const handleNativeError = () => {
+    if (extractDriveId(videoUrl) && driveFailedFor !== videoUrl) {
+      setDriveFailedFor(videoUrl);
+    }
+  };
+
+  const handleNativeEnded = () => {
+    const el = videoRef.current;
+    if (!el || !canDrive || isProgrammatic()) return;
+    emitState({ isPlaying: false, positionSec: el.currentTime || 0 });
   };
 
   const handleNativeSeeked = () => {
     const el = videoRef.current;
     if (!el) return;
-    if (!isAdmin) return;
+    if (!canDrive || isProgrammatic()) return;
     emitState({ isPlaying: !el.paused, positionSec: el.currentTime || 0 });
   };
 
@@ -252,34 +359,45 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
     const p = event.target;
     const pos = p.getCurrentTime ? p.getCurrentTime() : 0;
 
-    if (isAdmin) {
+    if (canDrive) {
+      if (isProgrammatic()) return;
       if (state === YTState.PLAYING) {
         emitState({ isPlaying: true, positionSec: pos });
-      } else if (state === YTState.PAUSED) {
+      } else if (state === YTState.PAUSED || state === YTState.ENDED) {
+        // ENDED counts as paused at the end, otherwise the room's clock keeps
+        // running past the end of the video
         emitState({ isPlaying: false, positionSec: pos });
       }
       return;
     }
 
+    // our own pause/play to follow the room is not the viewer's doing
+    if (isProgrammatic()) return;
+
     // Viewer behavior: local pause allowed, unpause triggers resync
     if (state === YTState.PAUSED) {
-      setViewerLocallyPaused(true);
-    } else if (state === YTState.PLAYING && viewerLocallyPaused) {
+      setLocalPause(true);
+    } else if (state === YTState.PLAYING && locallyPausedRef.current) {
       socket.emit("video:state:request", { roomId });
-      setViewerLocallyPaused(false);
+      setLocalPause(false);
     }
   };
 
-  // Admin-only YouTube seek detection
+  // YouTube seek detection for whoever can control playback
   useEffect(() => {
-    if (kind !== "youtube" || !isAdmin) return;
+    if (kind !== "youtube" || !canDrive) return;
 
     let prev = 0;
     const id = setInterval(() => {
       const p = ytPlayerRef.current;
-      if (!p || applyingRemoteRef.current) return;
+      if (!p) return;
 
       const current = p.getCurrentTime ? p.getCurrentTime() : 0;
+      // a jump we caused ourselves (following the room) is not a user seek
+      if (applyingRemoteRef.current || isProgrammatic()) {
+        prev = current;
+        return;
+      }
       const playing =
         p.getPlayerState && window.YT
           ? p.getPlayerState() === window.YT.PlayerState.PLAYING
@@ -292,7 +410,16 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
     }, 1000);
 
     return () => clearInterval(id);
-  }, [kind, isAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, canDrive]);
+
+  // Viewer asks to catch up with the room: drop any local pause and ask the
+  // server for the current position (the normal state handler then applies it).
+  const syncNow = () => {
+    lastYTApplyAtRef.current = 0; // let the YouTube throttle through
+    setLocalPause(false);
+    socket.emit("video:state:request", { roomId });
+  };
 
   // Runs inside the tap, so the browser allows playback. Jump to where the
   // room is now first, and keep the admin's player from echoing that jump back.
@@ -303,6 +430,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
       : 0;
 
     applyingRemoteRef.current = true;
+    markProgrammatic();
     try {
       if (kind === "native" && videoRef.current) {
         videoRef.current.currentTime = target;
@@ -311,13 +439,15 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
         ytPlayerRef.current.seekTo(target, true);
         ytPlayerRef.current.playVideo();
       }
-    } catch {}
+    } catch {
+            /* the player may not be ready yet; the next state update retries */
+          }
     setTimeout(() => {
       applyingRemoteRef.current = false;
     }, 1000);
 
     setNeedsTap(false);
-    setViewerLocallyPaused(false);
+    setLocalPause(false);
     socket.emit("video:state:request", { roomId });
   };
 
@@ -382,6 +512,10 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
           onPlay={handleNativePlay}
           onPause={handleNativePause}
           onSeeked={handleNativeSeeked}
+          onEnded={handleNativeEnded}
+          onError={handleNativeError}
+          playsInline
+          preload="metadata"
         />
       )}
 
@@ -400,7 +534,22 @@ export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
         </button>
       )}
 
-      {!isAdmin && viewerLocallyPaused && kind !== "none" && (
+      {kind === "drive" && (
+        <div className="eyebrow pointer-events-none absolute left-4 top-4 rounded border border-line bg-bg/80 px-3 py-2 text-muted backdrop-blur-sm">
+          Drive couldn&apos;t stream this file · playback isn&apos;t synced
+        </div>
+      )}
+
+      {!isAdmin && (kind === "youtube" || kind === "native") && !needsTap && (
+        <button
+          onClick={syncNow}
+          className="eyebrow absolute right-4 top-4 z-[5] rounded border border-line bg-bg/80 px-3 py-2 text-muted backdrop-blur-sm transition-colors hover:text-accent"
+        >
+          Sync with room
+        </button>
+      )}
+
+      {!canDrive && viewerLocallyPaused && kind !== "none" && (
         <div className="eyebrow pointer-events-none absolute left-4 top-4 rounded border border-line bg-bg/80 px-3 py-2 text-muted backdrop-blur-sm">
           Paused for you · resyncs when you resume
         </div>

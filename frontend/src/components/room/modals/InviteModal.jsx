@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Check, Mail } from "lucide-react";
+import { Copy, Check, Mail, Share2 } from "lucide-react";
 import ModalShell from "./ModalShell";
 import Button from "../../ui/Button";
 import { copyText } from "../../../utils/clipboard";
@@ -20,6 +20,20 @@ export default function InviteModal({ open, onClose, roomId = "" }) {
     }
   };
 
+  // phones and some desktops open their own share sheet (WhatsApp, Messages...)
+  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const nativeShare = async () => {
+    try {
+      await navigator.share({
+        title: "Join my CoWatch room",
+        text: "Watch together with me on CoWatch.",
+        url: inviteLink,
+      });
+    } catch {
+      // the user closed the share sheet: nothing to do
+    }
+  };
+
   const shareByEmail = () => {
     const subject = encodeURIComponent("Join my CoWatch room");
     const body = encodeURIComponent(
@@ -36,9 +50,16 @@ export default function InviteModal({ open, onClose, roomId = "" }) {
       maxWidth="max-w-lg"
       footer={
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button variant="ghost" onClick={shareByEmail} icon={Mail}>
-            Email
-          </Button>
+          <div className="flex gap-3">
+            {canShare && (
+              <Button variant="ghost" onClick={nativeShare} icon={Share2}>
+                Share
+              </Button>
+            )}
+            <Button variant="ghost" onClick={shareByEmail} icon={Mail}>
+              Email
+            </Button>
+          </div>
           <div className="flex gap-3">
             <Button variant="ghost" onClick={onClose}>
               Close

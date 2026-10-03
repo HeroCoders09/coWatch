@@ -54,3 +54,39 @@ body {
   background-size: 64px 64px;
   mask-image: radial-gradient(ellipse 70% 60% at 75% 40%, #000 20%, transparent 75%);
 }
+
+/* emoji reactions floating up over the video */
+@keyframes cw-float {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    transform: translateY(-6%) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(calc(-1 * min(260px, 45dvh))) scale(1.15);
+    opacity: 0;
+  }
+}
+@keyframes cw-fade {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.cw-reaction {
+  animation: cw-float 2.6s ease-out forwards;
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-reaction {
+    animation: cw-fade 2.6s ease-out forwards;
+  }
+}

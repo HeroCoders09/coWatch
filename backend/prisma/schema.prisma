@@ -91,3 +91,22 @@ model ChatMessage {
 
   @@index([roomCode, createdAt])
 }
+
+// ─── RoomState: what a room needs to survive a server restart ──────────────────
+// Presence (who is connected right now) is not stored; people simply rejoin.
+// Playback comes back paused at positionSec. Rooms unused for 7 days are deleted
+// by the server (see lastActiveAt).
+
+model RoomState {
+  roomCode      String   @id // same string as the roomId used in socket events
+  name          String
+  adminClientId String
+  videoUrl      String?  @db.Text
+  isPlaying     Boolean  @default(false)
+  positionSec   Float    @default(0)
+  sharedControl Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  lastActiveAt  DateTime @default(now())
+
+  @@index([lastActiveAt])
+}

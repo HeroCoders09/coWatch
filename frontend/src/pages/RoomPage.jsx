@@ -5,6 +5,7 @@ import ChatPanel from "../components/room/ChatPanel";
 import SetVideoModal from "../components/room/modals/SetVideoModal";
 import LeaveRoomModal from "../components/room/modals/LeaveRoomModal";
 import InviteModal from "../components/room/modals/InviteModal";
+import { ReactionBar, ReactionLayer } from "../components/room/Reactions";
 import { socket } from "../services/socket";
 
 const CLIENT_ID_KEY = "cowatch_client_id";
@@ -17,6 +18,9 @@ export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
   const [videoUrl, setVideoUrl] = useState("");
   const [liveRoomName, setLiveRoomName] = useState(roomData?.roomName || "");
   const [connected, setConnected] = useState(socket.connected);
+  const [sharedControl, setSharedControl] = useState(false); // admin lets everyone control playback
+  // our id as other people see it (the server sends it; the real clientId stays private)
+  const [selfId, setSelfId] = useState(null);
 
   const roomId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -45,17 +49,22 @@ export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
   const roomName =
     liveRoomName || roomData?.roomName || `Room-${roomId.slice(0, 4)}`;
 
-  const isAdmin = users.some((u) => u.clientId === clientId && u.isAdmin);
+  const isAdmin = Boolean(selfId) && users.some((u) => u.id === selfId && u.isAdmin);
+  const canControl = isAdmin || sharedControl;
 
   useEffect(() => {
     localStorage.setItem("username", currentUserName);
 
     const handleUsers = ({ users }) => setUsers(users || []);
     const handleVideoUpdate = ({ videoUrl }) => setVideoUrl(videoUrl);
-    const handleRoomMeta = ({ roomName }) => {
+    const handleRoomMeta = ({ roomName, sharedControl }) => {
       if (roomName) setLiveRoomName(roomName);
+      if (typeof sharedControl === "boolean") setSharedControl(sharedControl);
     };
 
+    const handleYou = ({ id }) => setSelfId(id);
+
+    socket.on("room:you", handleYou);
     socket.on("presence:users", handleUsers);
     socket.on("video:update", handleVideoUpdate);
     socket.on("room:meta", handleRoomMeta);
@@ -83,6 +92,7 @@ export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
     socket.on("connect", joinRoom);
 
     return () => {
+      socket.off("room:you", handleYou);
       socket.off("presence:users", handleUsers);
       socket.off("video:update", handleVideoUpdate);
       socket.off("room:meta", handleRoomMeta);
@@ -127,15 +137,20 @@ export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
         </div>
       )}
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_340px]">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[minmax(0,1fr)]">
         {/* phones/tablets: fixed 16:9 video on top (capped for landscape), chat fills the rest */}
-        <div className="flex aspect-video max-h-[55dvh] w-full min-w-0 shrink-0 items-center justify-center bg-black lg:aspect-auto lg:h-full lg:max-h-none">
-          <VideoStage
-            videoUrl={videoUrl}
-            roomId={roomId}
-            isAdmin={isAdmin}
-            onSetVideo={() => setSetVideoOpen(true)}
-          />
+        <div className="flex min-h-0 min-w-0 shrink-0 flex-col lg:h-full lg:shrink">
+          <div className="relative flex aspect-video max-h-[55dvh] w-full min-w-0 items-center justify-center bg-black lg:aspect-auto lg:min-h-0 lg:flex-1 lg:max-h-none">
+            <VideoStage
+              videoUrl={videoUrl}
+              roomId={roomId}
+              isAdmin={isAdmin}
+              canControl={canControl}
+              onSetVideo={() => setSetVideoOpen(true)}
+            />
+            <ReactionLayer />
+          </div>
+          <ReactionBar roomId={roomId} />
         </div>
 
         <div className="min-h-0 min-w-0 flex-1 border-t border-line lg:border-l lg:border-t-0">
@@ -144,8 +159,12 @@ export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
             roomId={roomId}
             roomName={roomName}
             currentUserName={currentUserName}
-            clientId={clientId}
+            selfId={selfId}
             isAdmin={isAdmin}
+            sharedControl={sharedControl}
+            onToggleControl={() =>
+              socket.emit("room:control", { roomId, shared: !sharedControl })
+            }
           />
         </div>
       </main>

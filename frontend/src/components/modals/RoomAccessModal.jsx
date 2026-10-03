@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import Button from "../ui/Button";
 
-function Field({ label, placeholder, value, onChange, autoFocus }) {
+function Field({ label, placeholder, value, onChange, autoFocus, maxLength }) {
   return (
     <div>
       <label className="eyebrow mb-3 block text-muted">{label}</label>
       <input
         autoFocus={autoFocus}
+        maxLength={maxLength}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -96,12 +97,14 @@ function RoomAccessModalContent({
             placeholder="How should others see you?"
             value={name}
             onChange={setName}
+            maxLength={40}
           />
           <Field
             label={isCreate ? "Room name" : "Room code"}
             placeholder={isCreate ? "Friday movie night" : "Paste the room code"}
             value={roomNameOrId}
             onChange={setRoomNameOrId}
+            maxLength={isCreate ? 60 : 64}
           />
           {error ? <p className="text-sm text-danger">{error}</p> : null}
 

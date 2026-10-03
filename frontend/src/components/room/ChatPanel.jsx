@@ -5,16 +5,23 @@ export default function ChatPanel({
   users = [],
   roomId,
   currentUserName,
-  clientId,
+  selfId,
   isAdmin = false,
+  sharedControl = false,
+  onToggleControl,
 }) {
   const [activeTab, setActiveTab] = useState("chat");
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [unread, setUnread] = useState(0); // messages that arrived while on the People tab
+  const activeTabRef = useRef("chat");
 
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  const selfIdRef = useRef(selfId);
+  selfIdRef.current = selfId;
 
   const listRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -64,7 +71,12 @@ export default function ChatPanel({
       });
     };
 
-    const handleMessage = (msg) => append(msg);
+    const handleMessage = (msg) => {
+      append(msg);
+      if (activeTabRef.current !== "chat" && msg.senderId !== selfIdRef.current) {
+        setUnread((n) => n + 1);
+      }
+    };
     // "Asha joined", "Ravi is now the admin": a quiet line, not a chat message
     const handleNotice = (n) => append({ system: true, message: n.message, time: n.time });
 
@@ -99,6 +111,15 @@ export default function ChatPanel({
     setInput("");
   };
 
+  const openTab = (id) => {
+    activeTabRef.current = id;
+    setActiveTab(id);
+    if (id === "chat") setUnread(0);
+  };
+
+  const formatTime = (t) =>
+    t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+
   const tab = (id) =>
     `eyebrow relative flex-1 py-4 transition-colors ${
       activeTab === id
@@ -109,10 +130,18 @@ export default function ChatPanel({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
       <div className="flex shrink-0 border-b border-line">
-        <button className={tab("chat")} onClick={() => setActiveTab("chat")}>
+        <button className={tab("chat")} onClick={() => openTab("chat")}>
           Chat
+          {unread > 0 && (
+            <span
+              className="ml-2 inline-grid min-w-4 place-items-center rounded-full bg-accent px-1 py-0.5 text-[10px] font-semibold leading-none tracking-normal text-bg"
+              aria-label={`${unread} unread`}
+            >
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
         </button>
-        <button className={tab("users")} onClick={() => setActiveTab("users")}>
+        <button className={tab("users")} onClick={() => openTab("users")}>
           People · {users.length}
         </button>
       </div>
@@ -150,9 +179,9 @@ export default function ChatPanel({
                   </p>
                 );
               }
-              // new messages carry the sender's clientId; older rows only have a name
-              const mine = msg.clientId
-                ? msg.clientId === clientId
+              // new messages carry the sender's public id; older rows only have a name
+              const mine = msg.senderId
+                ? msg.senderId === selfId
                 : msg.userName === currentUserName;
               return (
                 <div
@@ -165,6 +194,9 @@ export default function ChatPanel({
                     }`}
                   >
                     {mine ? "You" : msg.userName}
+                  </span>
+                  <span className="mr-2 text-[10px] text-muted/60">
+                    {formatTime(msg.time)}
                   </span>
                   <span className="text-fg/90">{msg.message}</span>
                 </div>
@@ -194,12 +226,45 @@ export default function ChatPanel({
       )}
 
       {activeTab === "users" && (
+        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm">Everyone controls playback</p>
+            <p className="mt-1 text-xs text-muted">
+              {sharedControl
+                ? "Anyone can play, pause and seek."
+                : "Only the admin can play, pause and seek."}
+            </p>
+          </div>
+          {isAdmin ? (
+            <button
+              role="switch"
+              aria-checked={sharedControl}
+              aria-label="Everyone controls playback"
+              onClick={onToggleControl}
+              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+                sharedControl ? "border-accent bg-accent/20" : "border-line bg-bg"
+              }`}
+            >
+              <span
+                className={`absolute left-0.5 top-0.5 h-4.5 w-4.5 rounded-full transition-transform ${
+                  sharedControl ? "translate-x-5 bg-accent" : "translate-x-0 bg-muted"
+                }`}
+              />
+            </button>
+          ) : (
+            <span className="eyebrow shrink-0 text-muted">
+              {sharedControl ? "On" : "Off"}
+            </span>
+          )}
+        </div>
+
         <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto overflow-x-hidden">
           {users.map((user) => {
-            const isMe = user.clientId === clientId;
+            const isMe = user.id === selfId;
             return (
               <li
-                key={user.clientId ?? user.userName}
+                key={user.id ?? user.userName}
                 className="flex items-center justify-between gap-3 px-4 py-3"
               >
                 <div className="flex min-w-0 items-center gap-3">
@@ -222,7 +287,7 @@ export default function ChatPanel({
                     onClick={() =>
                       socket.emit("admin:transfer", {
                         roomId,
-                        targetClientId: user.clientId,
+                        targetId: user.id,
                       })
                     }
                     className="eyebrow shrink-0 text-muted transition-colors hover:text-accent"
@@ -234,6 +299,7 @@ export default function ChatPanel({
             );
           })}
         </ul>
+        </div>
       )}
     </div>
   );
