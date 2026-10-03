@@ -1,37 +1,27 @@
-import { Sparkles, Video } from "lucide-react";
 import SectionContainer from "../ui/SectionContainer";
-import GradientButton from "../ui/GradientButton";
 
 export default function Navbar({ onCreateRoom, onJoinRoom }) {
   return (
-    <header className="pt-8 md:pt-10">
-      <SectionContainer className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-linear-to-br from-cyan-400 to-fuchsia-500 text-white shadow-[0_0_40px_rgba(83,141,255,.35)]">
-            <Video size={17} />
-          </div>
-          <span className="text-3xl font-bold tracking-tight text-sky-300 md:text-4xl">
-            CoWatch
-          </span>
-        </div>
+    <header className="absolute inset-x-0 top-0 z-10">
+      <SectionContainer className="flex h-20 items-center justify-between">
+        <span className="font-display text-2xl tracking-tight text-accent">
+          CoWatch
+        </span>
 
-        <div className="flex items-center gap-3">
+        <nav className="flex items-center gap-8">
           <button
             onClick={onJoinRoom}
-            className="hidden bg-transparent text-[15px] font-semibold text-slate-200 md:block"
+            className="eyebrow text-muted transition-colors hover:text-fg"
           >
-            Join Room
+            Join
           </button>
-
-          <GradientButton
+          <button
             onClick={onCreateRoom}
-            className="rounded-xl px-4 py-2.5 text-sm md:text-[15px]"
-            icon={Sparkles}
-            iconSize={14}
+            className="eyebrow text-accent transition-colors hover:text-fg"
           >
-            Create Room
-          </GradientButton>
-        </div>
+            Create room
+          </button>
+        </nav>
       </SectionContainer>
     </header>
   );

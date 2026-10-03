@@ -1,43 +1,28 @@
 import ModalShell from "./ModalShell";
+import Button from "../../ui/Button";
 
-export default function LeaveRoomModal({
-  open,
-  onClose,
-  onConfirm,
-  isAdmin,
-}) {
+export default function LeaveRoomModal({ open, onClose, onConfirm }) {
   if (!open) return null;
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Leave Room?">
-      <div className="space-y-4 text-white">
-        
-        <p>
-          Are you sure you want to leave this room?
-        </p>
-
-        {isAdmin && (
-          <p className="text-red-400">
-            As the admin, leaving will end the session for everyone.
-          </p>
-        )}
-
-        <div className="flex justify-end gap-4 pt-4">
-          <button
-            onClick={onClose}
-            className="text-white/70 px-4 py-2"
-          >
-            Cancel
-          </button>
-
-          <button
-            onClick={onConfirm}
-            className="bg-red-500 px-5 py-2 rounded-lg text-white"
-          >
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="Leave room?"
+      footer={
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>
+            Stay
+          </Button>
+          <Button variant="danger" onClick={onConfirm}>
             Leave
-          </button>
+          </Button>
         </div>
-      </div>
+      }
+    >
+      <p className="text-sm leading-relaxed text-muted">
+        You can rejoin any time with the room link or code.
+      </p>
     </ModalShell>
   );
 }

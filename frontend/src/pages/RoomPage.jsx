@@ -9,13 +9,14 @@ import { socket } from "../services/socket";
 
 const CLIENT_ID_KEY = "cowatch_client_id";
 
-export default function RoomPage({ roomData, onLeaveRoom }) {
+export default function RoomPage({ roomData, onLeaveRoom, onRoomNotFound }) {
   const [setVideoOpen, setSetVideoOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [users, setUsers] = useState([]);
   const [videoUrl, setVideoUrl] = useState("");
   const [liveRoomName, setLiveRoomName] = useState(roomData?.roomName || "");
+  const [connected, setConnected] = useState(socket.connected);
 
   const roomId = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
@@ -59,6 +60,17 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
     socket.on("video:update", handleVideoUpdate);
     socket.on("room:meta", handleRoomMeta);
 
+    const handleRoomError = ({ code, message }) => {
+      if (code === "ROOM_NOT_FOUND") onRoomNotFound?.(roomId, message);
+    };
+    socket.on("room:error", handleRoomError);
+
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => setConnected(false);
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleDisconnect);
+
     const joinRoom = () => {
       socket.emit("room:join", {
         roomId,
@@ -74,8 +86,14 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
       socket.off("presence:users", handleUsers);
       socket.off("video:update", handleVideoUpdate);
       socket.off("room:meta", handleRoomMeta);
+      socket.off("room:error", handleRoomError);
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleDisconnect);
       socket.off("connect", joinRoom);
     };
+    // onRoomNotFound is intentionally left out: it must not re-run the join
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, currentUserName, clientId]);
 
   const handleConfirmLeave = () => {
@@ -85,7 +103,7 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
   };
 
   return (
-    <div className="h-screen overflow-hidden text-white bg-[#020617]">
+    <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
       <RoomTopBar
         onSetVideo={() => {
           if (!isAdmin) return;
@@ -99,17 +117,35 @@ export default function RoomPage({ roomData, onLeaveRoom }) {
         isAdmin={isAdmin}
       />
 
-      <main className="grid h-[calc(100vh-72px)] min-h-0 min-w-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-h-0 min-w-0 overflow-hidden">
-          <VideoStage videoUrl={videoUrl} roomId={roomId} isAdmin={isAdmin} />
+      {!connected && (
+        <div
+          role="status"
+          className="eyebrow flex shrink-0 items-center justify-center gap-2 border-b border-line bg-raised px-4 py-2.5 text-muted"
+        >
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+          Connection lost · reconnecting…
+        </div>
+      )}
+
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_340px]">
+        {/* phones/tablets: fixed 16:9 video on top (capped for landscape), chat fills the rest */}
+        <div className="flex aspect-video max-h-[55dvh] w-full min-w-0 shrink-0 items-center justify-center bg-black lg:aspect-auto lg:h-full lg:max-h-none">
+          <VideoStage
+            videoUrl={videoUrl}
+            roomId={roomId}
+            isAdmin={isAdmin}
+            onSetVideo={() => setSetVideoOpen(true)}
+          />
         </div>
 
-        <div className="min-h-0 min-w-0 border-l border-white/10">
+        <div className="min-h-0 min-w-0 flex-1 border-t border-line lg:border-l lg:border-t-0">
           <ChatPanel
             users={users}
             roomId={roomId}
             roomName={roomName}
             currentUserName={currentUserName}
+            clientId={clientId}
+            isAdmin={isAdmin}
           />
         </div>
       </main>

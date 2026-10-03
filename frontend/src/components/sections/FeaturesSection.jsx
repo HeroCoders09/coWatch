@@ -1,23 +1,30 @@
 import SectionContainer from "../ui/SectionContainer";
-import FeatureCard from "../ui/FeatureCard";
 import { features } from "../../data/features";
 
 export default function FeaturesSection() {
   return (
-    <section className="pt-20 md:pt-24">
+    <section className="border-t border-line py-24 md:py-32">
       <SectionContainer>
-        <h2 className="text-center text-2xl font-bold leading-tight sm:text-3xl md:text-4xl">
-          Everything You Need for the Perfect Watch Party
+        <p className="eyebrow text-accent">How it works</p>
+        <h2 className="mt-6 max-w-[22ch] font-display text-3xl leading-tight tracking-tight md:text-5xl">
+          Everything you need for a watch party, nothing you don't.
         </h2>
-        <p className="mx-auto mt-4 max-w-195 text-center text-base leading-relaxed text-slate-300 md:text-lg">
-          Powerful features designed to make watching videos together seamless and enjoyable.
-        </p>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {features.map((feature) => (
-            <FeatureCard key={feature.title} {...feature} />
+        <dl className="mt-16 grid gap-px overflow-hidden rounded-xl border border-line bg-line md:grid-cols-2">
+          {features.map((f, i) => (
+            <div key={f.title} className="bg-bg p-8 md:p-10">
+              <span className="eyebrow text-muted">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <dt className="mt-6 font-display text-2xl tracking-tight">
+                {f.title}
+              </dt>
+              <dd className="mt-3 max-w-sm text-sm leading-relaxed text-muted">
+                {f.desc}
+              </dd>
+            </div>
           ))}
-        </div>
+        </dl>
       </SectionContainer>
     </section>
   );

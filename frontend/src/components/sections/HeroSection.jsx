@@ -1,49 +1,45 @@
-import { Globe, Play, Users } from "lucide-react";
 import SectionContainer from "../ui/SectionContainer";
-import GradientButton from "../ui/GradientButton";
+import HeroIllustration from "./HeroIllustration";
 
 export default function HeroSection({ onCreateRoom, onJoinRoom }) {
   return (
-    <section className="pt-14 text-center md:pt-16">
-      <SectionContainer>
-        <div className="mx-auto mb-8 flex w-fit items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">
-          <Globe size={15} />
-          Watch together from anywhere in the world
-        </div>
+    <section className="relative flex min-h-dvh items-center overflow-hidden">
+      <div className="hero-grid pointer-events-none absolute inset-0" aria-hidden />
 
-        <h1 className="mx-auto max-w-230 text-4xl font-extrabold leading-[1.06] tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
-          Watch Videos{" "}
-          <span className="bg-linear-to-r from-fuchsia-400 via-violet-300 to-sky-300 bg-clip-text text-transparent">
-            Together
-          </span>
-          <br />
-          In Perfect Sync
+      <HeroIllustration
+        aria-hidden
+        className="pointer-events-none absolute right-[2%] top-1/2 hidden w-[min(50vw,600px)] -translate-y-[44%] md:block"
+      />
+
+      <SectionContainer className="relative">
+        <h1 className="max-w-[13ch] font-display text-5xl leading-[1.04] tracking-tight sm:text-6xl md:text-6xl lg:text-7xl xl:text-8xl">
+          Watch together, in sync.
         </h1>
 
-        <p className="mx-auto mt-6 max-w-190 text-base leading-relaxed text-slate-300 md:text-lg">
-          Create a private room, invite your friends, and enjoy synchronized video
-          watching with real-time chat. No distance is too far.
+        <p className="mt-8 max-w-md text-base leading-relaxed text-muted md:text-lg">
+          Private rooms, shared playback and a chat on the side. Share a link,
+          press play, and everyone is on the same second.
         </p>
 
-        <div className="mt-8 flex flex-wrap justify-center gap-3">
-          <GradientButton
+        <div className="mt-12 flex items-center gap-10">
+          <button
             onClick={onCreateRoom}
-            className="rounded-2xl px-7 py-3.5 text-base md:text-lg"
-            icon={Play}
-            iconSize={17}
+            className="eyebrow text-accent transition-colors hover:text-fg"
           >
-            Create a Room
-          </GradientButton>
-
+            Create a room →
+          </button>
           <button
             onClick={onJoinRoom}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-slate-600/70 px-7 py-3.5 text-base font-semibold text-white transition hover:bg-slate-500/70 md:text-lg"
+            className="eyebrow text-muted transition-colors hover:text-fg"
           >
-            <Users size={17} />
-            Join Existing Room
+            Join with a code
           </button>
         </div>
       </SectionContainer>
+
+      <div className="eyebrow absolute bottom-8 left-[5%] flex items-center gap-2 text-accent/80 md:left-[max(5%,calc((100%-1120px)/2))]">
+        <span aria-hidden>↓</span> Scroll
+      </div>
     </section>
   );
 }

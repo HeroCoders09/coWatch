@@ -1,17 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import YouTube from "react-youtube";
+import { Play } from "lucide-react";
 import { socket } from "../../services/socket";
 
-export default function VideoStage({ videoUrl, roomId, isAdmin }) {
+export default function VideoStage({ videoUrl, roomId, isAdmin, onSetVideo }) {
   const [kind, setKind] = useState("none"); // none | youtube | drive | native
   const [embedUrl, setEmbedUrl] = useState("");
   const [youtubeId, setYoutubeId] = useState("");
   const [viewerLocallyPaused, setViewerLocallyPaused] = useState(false);
+  // browsers block play() until the page has had a user gesture; when that
+  // happens we show a "tap to join" overlay instead of a silently stuck video
+  const [needsTap, setNeedsTap] = useState(false);
 
   const videoRef = useRef(null);
   const ytPlayerRef = useRef(null);
   const applyingRemoteRef = useRef(false);
   const lastYTApplyAtRef = useRef(0);
+  const lastServerStateRef = useRef(null); // { isPlaying, positionSec, at }
+  const ytAutoplayCheckRef = useRef(null);
+
+  useEffect(() => {
+    setNeedsTap(false);
+    lastServerStateRef.current = null;
+  }, [videoUrl]);
+
+  useEffect(() => () => clearTimeout(ytAutoplayCheckRef.current), []);
 
   useEffect(() => {
     if (!videoUrl || !videoUrl.trim()) {
@@ -72,6 +85,11 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
   useEffect(() => {
     const handleVideoState = ({ isPlaying, positionSec }) => {
       const target = Number(positionSec || 0);
+      lastServerStateRef.current = {
+        isPlaying: Boolean(isPlaying),
+        positionSec: target,
+        at: Date.now(),
+      };
       applyingRemoteRef.current = true;
 
       if (kind === "native") {
@@ -93,7 +111,9 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           el.pause();
         } else {
           if (isPlaying) {
-            el.play().catch(() => {});
+            el.play().catch((err) => {
+              if (err?.name === "NotAllowedError") setNeedsTap(true);
+            });
             if (!isAdmin) setViewerLocallyPaused(false);
           } else {
             el.pause();
@@ -137,6 +157,18 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
             if (isPlaying && playerState !== YTState.PLAYING) {
               p.playVideo();
               if (!isAdmin) setViewerLocallyPaused(false);
+
+              // YouTube gives no error when autoplay is blocked, so check
+              // shortly after whether it actually started
+              clearTimeout(ytAutoplayCheckRef.current);
+              ytAutoplayCheckRef.current = setTimeout(() => {
+                const pl = ytPlayerRef.current;
+                const st = pl?.getPlayerState ? pl.getPlayerState() : -1;
+                const wanted = lastServerStateRef.current?.isPlaying;
+                if (wanted && st !== YTState.PLAYING && st !== YTState.BUFFERING) {
+                  setNeedsTap(true);
+                }
+              }, 1500);
             } else if (!isPlaying && playerState === YTState.PLAYING) {
               p.pauseVideo();
             }
@@ -170,6 +202,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
   const handleNativePlay = () => {
     const el = videoRef.current;
     if (!el) return;
+    setNeedsTap(false);
 
     if (isAdmin) {
       emitState({ isPlaying: true, positionSec: el.currentTime || 0 });
@@ -210,11 +243,13 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
   };
 
   const onYouTubeStateChange = (event) => {
+    const state = event.data;
+    const YTState = window.YT?.PlayerState || {};
+    if (state === YTState.PLAYING) setNeedsTap(false);
+
     if (applyingRemoteRef.current) return;
 
     const p = event.target;
-    const state = event.data;
-    const YTState = window.YT?.PlayerState || {};
     const pos = p.getCurrentTime ? p.getCurrentTime() : 0;
 
     if (isAdmin) {
@@ -259,15 +294,62 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
     return () => clearInterval(id);
   }, [kind, isAdmin]);
 
+  // Runs inside the tap, so the browser allows playback. Jump to where the
+  // room is now first, and keep the admin's player from echoing that jump back.
+  const joinPlayback = () => {
+    const last = lastServerStateRef.current;
+    const target = last
+      ? last.positionSec + (last.isPlaying ? (Date.now() - last.at) / 1000 : 0)
+      : 0;
+
+    applyingRemoteRef.current = true;
+    try {
+      if (kind === "native" && videoRef.current) {
+        videoRef.current.currentTime = target;
+        videoRef.current.play().catch(() => {});
+      } else if (kind === "youtube" && ytPlayerRef.current) {
+        ytPlayerRef.current.seekTo(target, true);
+        ytPlayerRef.current.playVideo();
+      }
+    } catch {}
+    setTimeout(() => {
+      applyingRemoteRef.current = false;
+    }, 1000);
+
+    setNeedsTap(false);
+    setViewerLocallyPaused(false);
+    socket.emit("video:state:request", { roomId });
+  };
+
   return (
-    <div className="h-[70vh] flex items-center justify-center bg-black rounded-xl overflow-hidden">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black">
       {kind === "none" ? (
-        <p className="text-white/50">No video selected</p>
+        <div className="mx-auto flex max-w-sm flex-col items-center px-6 text-center">
+          <div className="grid h-14 w-14 place-items-center rounded-full border border-line text-muted">
+            <Play size={20} />
+          </div>
+          <h2 className="mt-6 font-display text-3xl tracking-tight">
+            Nothing playing yet
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            {isAdmin
+              ? "Paste a YouTube, Drive or direct video link to start the room."
+              : "Waiting for the admin to pick a video."}
+          </p>
+          {isAdmin && onSetVideo ? (
+            <button
+              onClick={onSetVideo}
+              className="eyebrow mt-8 text-accent transition-colors hover:text-fg"
+            >
+              Set video →
+            </button>
+          ) : null}
+        </div>
       ) : kind === "youtube" ? (
         <YouTube
           videoId={youtubeId}
-          className="w-full h-full"
-          iframeClassName="w-full h-full rounded-xl"
+          className="h-full w-full"
+          iframeClassName="h-full w-full"
           opts={{
             width: "100%",
             height: "100%",
@@ -286,7 +368,7 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
       ) : kind === "drive" ? (
         <iframe
           src={embedUrl}
-          className="w-full h-full rounded-xl"
+          className="h-full w-full"
           allow="autoplay; encrypted-media; fullscreen"
           allowFullScreen
           title="drive-player"
@@ -296,11 +378,32 @@ export default function VideoStage({ videoUrl, roomId, isAdmin }) {
           ref={videoRef}
           src={embedUrl}
           controls={true} // everyone gets controls incl fullscreen
-          className="w-full h-full rounded-xl"
+          className="h-full w-full"
           onPlay={handleNativePlay}
           onPause={handleNativePause}
           onSeeked={handleNativeSeeked}
         />
+      )}
+
+      {needsTap && (kind === "youtube" || kind === "native") && (
+        <button
+          onClick={joinPlayback}
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-bg/80 px-6 text-center backdrop-blur-sm"
+        >
+          <span className="grid h-14 w-14 place-items-center rounded-full border border-accent text-accent">
+            <Play size={20} />
+          </span>
+          <span className="font-display text-2xl tracking-tight sm:text-3xl">
+            The room is playing
+          </span>
+          <span className="eyebrow text-accent">Tap to join in</span>
+        </button>
+      )}
+
+      {!isAdmin && viewerLocallyPaused && kind !== "none" && (
+        <div className="eyebrow pointer-events-none absolute left-4 top-4 rounded border border-line bg-bg/80 px-3 py-2 text-muted backdrop-blur-sm">
+          Paused for you · resyncs when you resume
+        </div>
       )}
     </div>
   );

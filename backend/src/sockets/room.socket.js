@@ -7,6 +7,7 @@ const roomPlayback = new Map(); // roomId -> { isPlaying, positionSec, updatedAt
 // periodic room sync every 3s
 const RESYNC_INTERVAL_MS = 3000;
 const HISTORY_PAGE_SIZE = 30;
+const MAX_MESSAGE_LENGTH = 2000;
 let resyncTimerStarted = false;
 
 function emitUsers(io, roomId) {
@@ -25,6 +26,25 @@ function emitUsers(io, roomId) {
     users,
     count: users.length,
   });
+}
+
+// short system line shown in chat ("Asha joined"); `target` is io.to(room) or socket.to(room)
+function emitNotice(target, text) {
+  target.emit("room:notice", { message: text, time: Date.now() });
+}
+
+// removes a user and, if they were admin, hands admin to whoever is left.
+// returns the new admin's name when admin changed, otherwise null.
+function removeUser(room, clientId) {
+  const wasAdmin = room.adminClientId === clientId;
+  room.users.delete(clientId);
+
+  if (wasAdmin && room.users.size > 0) {
+    const nextUser = Array.from(room.users.values())[0];
+    room.adminClientId = nextUser.clientId;
+    return nextUser.userName;
+  }
+  return null;
 }
 
 function emitRoomMetaToRoom(io, roomId) {
@@ -86,10 +106,10 @@ function ensureResyncTimer(io) {
   }, RESYNC_INTERVAL_MS);
 }
 
-async function saveMessage(roomCode, userName, text) {
+async function saveMessage(roomCode, userName, clientId, text) {
   try {
     await prisma.chatMessage.create({
-      data: { roomCode, userName, text },
+      data: { roomCode, userName, clientId, text },
     });
   } catch (err) {
     console.error("[chat] Failed to persist message:", err.message);
@@ -100,6 +120,7 @@ function mapRows(rows) {
   return rows.map((r) => ({
     id: r.id,
     userName: r.userName,
+    clientId: r.clientId ?? null, // null for messages saved before clientId existed
     message: r.text,
     time: r.createdAt.getTime(),
   }));
@@ -193,16 +214,20 @@ export function registerRoomSocket(io, socket) {
   socket.on("room:join", async ({ roomId, userName, clientId }) => {
     if (!roomId || !userName || !clientId) return;
 
-    let room = rooms.get(roomId);
+    // joining never creates a room: a mistyped code (or a room that ended when
+    // the server restarted) gets a clear error instead of an empty room
+    const room = rooms.get(roomId);
     if (!room) {
-      room = {
+      socket.emit("room:error", {
+        code: "ROOM_NOT_FOUND",
         roomId,
-        roomName: `Room-${roomId.slice(0, 4)}`,
-        adminClientId: clientId,
-        users: new Map(),
-      };
-      rooms.set(roomId, room);
+        message: "That room doesn't exist or has ended.",
+      });
+      return;
     }
+
+    // reconnects re-send room:join with the same clientId; only announce first arrivals
+    const isNewMember = !room.users.has(clientId);
 
     socket.join(roomId);
     upsertUser(room, { clientId, userName, socketId: socket.id });
@@ -213,6 +238,8 @@ export function registerRoomSocket(io, socket) {
 
     emitUsers(io, roomId);
     emitRoomMetaToSocket(socket, room);
+
+    if (isNewMember) emitNotice(socket.to(roomId), `${userName} joined`);
 
     if (roomVideos.has(roomId)) {
       socket.emit("video:update", { videoUrl: roomVideos.get(roomId) });
@@ -234,6 +261,8 @@ export function registerRoomSocket(io, socket) {
 
   socket.on("chat:history:more", async ({ roomId, beforeId }) => {
     if (!roomId) return;
+    // only members of the room can read its history
+    if (socket.data.roomId !== roomId) return;
     const page = await loadOlderHistory(roomId, beforeId);
     socket.emit("chat:history:more", page);
   });
@@ -280,30 +309,41 @@ export function registerRoomSocket(io, socket) {
     socket.emit("video:state", getPlaybackState(roomId));
   });
 
-  socket.on("admin:transfer", ({ roomId, targetUserName }) => {
+  // Admin hands control to another user. Targets are identified by clientId,
+  // not by display name, so two users with the same name can't be confused.
+  socket.on("admin:transfer", ({ roomId, targetClientId }) => {
     const room = rooms.get(roomId);
     if (!room) return;
 
-    const currentClientId = socket.data.clientId;
-    if (room.adminClientId !== currentClientId) return;
+    if (room.adminClientId !== socket.data.clientId) return;
 
-    const target = Array.from(room.users.values()).find(
-      (u) => u.userName === targetUserName
-    );
+    const target = room.users.get(targetClientId);
     if (!target) return;
 
     room.adminClientId = target.clientId;
     emitUsers(io, roomId);
+    emitNotice(io.to(roomId), `${target.userName} is now the admin`);
   });
 
-  socket.on("chat:message", async ({ roomId, message, userName }) => {
-    if (!message?.trim() || !userName) return;
+  // Identity comes from the server-side socket session, never from the payload,
+  // so a client can't post as someone else or into a room it hasn't joined.
+  socket.on("chat:message", async ({ roomId, message }) => {
+    const { roomId: joinedRoomId, userName, clientId } = socket.data;
 
-    const trimmed = message.trim();
-    await saveMessage(roomId, userName, trimmed);
+    if (!roomId || roomId !== joinedRoomId || !userName || !clientId) return;
+
+    const room = rooms.get(roomId);
+    if (!room || !room.users.has(clientId)) return;
+
+    if (typeof message !== "string") return;
+    const trimmed = message.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!trimmed) return;
+
+    await saveMessage(roomId, userName, clientId, trimmed);
 
     io.to(roomId).emit("chat:message", {
       userName,
+      clientId,
       message: trimmed,
       time: Date.now(),
     });
@@ -316,14 +356,9 @@ export function registerRoomSocket(io, socket) {
     const id = clientId || socket.data.clientId;
     if (!id) return;
 
-    const wasAdmin = room.adminClientId === id;
-    room.users.delete(id);
+    const leaving = room.users.get(id);
+    const newAdminName = removeUser(room, id);
     socket.leave(roomId);
-
-    if (wasAdmin && room.users.size > 0) {
-      const nextUser = Array.from(room.users.values())[0];
-      room.adminClientId = nextUser.clientId;
-    }
 
     if (room.users.size === 0) {
       rooms.delete(roomId);
@@ -331,6 +366,8 @@ export function registerRoomSocket(io, socket) {
       roomPlayback.delete(roomId);
     } else {
       emitUsers(io, roomId);
+      if (leaving) emitNotice(io.to(roomId), `${leaving.userName} left`);
+      if (newAdminName) emitNotice(io.to(roomId), `${newAdminName} is now the admin`);
     }
   });
 
@@ -346,13 +383,7 @@ export function registerRoomSocket(io, socket) {
       const user = r.users.get(clientId);
       if (!user || user.socketId !== socket.id) return;
 
-      const wasAdmin = r.adminClientId === clientId;
-      r.users.delete(clientId);
-
-      if (wasAdmin && r.users.size > 0) {
-        const nextUser = Array.from(r.users.values())[0];
-        r.adminClientId = nextUser.clientId;
-      }
+      const newAdminName = removeUser(r, clientId);
 
       if (r.users.size === 0) {
         rooms.delete(roomId);
@@ -360,6 +391,8 @@ export function registerRoomSocket(io, socket) {
         roomPlayback.delete(roomId);
       } else {
         emitUsers(io, roomId);
+        emitNotice(io.to(roomId), `${user.userName} left`);
+        if (newAdminName) emitNotice(io.to(roomId), `${newAdminName} is now the admin`);
       }
     }, 4000);
   });

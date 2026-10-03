@@ -76,11 +76,16 @@ model Message {
 // ─── ChatMessage: standalone model used by the socket chat feature ─────────────
 // Uses roomCode (plain string, not a FK) so it works independently of the
 // Room/Session models above. No need to create Room/Session rows first.
+//
+// clientId identifies the sender (the UUID the browser keeps in localStorage).
+// It is nullable because messages saved before this column existed have none;
+// the UI falls back to matching by userName for those rows.
 
 model ChatMessage {
   id        String   @id @default(cuid())
   roomCode  String   // matches the roomId string used in socket events
   userName  String
+  clientId  String?
   text      String   @db.Text
   createdAt DateTime @default(now())
 

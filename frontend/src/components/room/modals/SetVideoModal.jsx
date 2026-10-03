@@ -1,18 +1,13 @@
 import { useState } from "react";
 import ModalShell from "./ModalShell";
+import Button from "../../ui/Button";
 
 export default function SetVideoModal({ open, onClose, onSetVideo }) {
   const [url, setUrl] = useState("");
 
   const handleSet = () => {
-    console.log("BUTTON CLICKED");
-
     if (!url.trim()) return;
-
-    if (typeof onSetVideo !== "function") {
-      console.error("onSetVideo is not a function");
-      return;
-    }
+    if (typeof onSetVideo !== "function") return;
 
     onSetVideo(url.trim());
     setUrl("");
@@ -22,29 +17,31 @@ export default function SetVideoModal({ open, onClose, onSetVideo }) {
   if (!open) return null;
 
   return (
-    <ModalShell open={open} onClose={onClose} title="Set Video URL">
-      <div className="space-y-4">
-        <input
-          type="text"
-          placeholder="Paste YouTube / Drive URL..."
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className="w-full rounded-xl bg-white/10 p-4 text-white outline-none"
-        />
-
-        <div className="flex justify-end gap-4">
-          <button onClick={onClose} className="text-white/70">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="Set video"
+      footer={
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-
-          <button
-            onClick={handleSet}
-            className="rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-6 py-2 text-white"
-          >
-            Set Video
-          </button>
+          </Button>
+          <Button onClick={handleSet} disabled={!url.trim()}>
+            Set video
+          </Button>
         </div>
-      </div>
+      }
+    >
+      <label className="eyebrow mb-3 block text-muted">Video URL</label>
+      <input
+        autoFocus
+        type="text"
+        placeholder="YouTube, Drive or direct video link"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && handleSet()}
+        className="w-full rounded-lg border border-line bg-bg px-3.5 py-3 text-sm text-fg placeholder:text-muted/70 outline-none transition-colors focus:border-accent"
+      />
     </ModalShell>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Video, Users, Crown, Link2, LogOut, Copy, Check } from "lucide-react";
+import { Users, Link2, LogOut, Copy, Check, Video } from "lucide-react";
 import { copyText } from "../../utils/clipboard";
 
 export default function RoomTopBar({
@@ -9,7 +9,7 @@ export default function RoomTopBar({
   roomName = "Room",
   roomId = "ROOMID",
   watcherCount = 1,
-  isAdmin = false, 
+  isAdmin = false,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -23,63 +23,57 @@ export default function RoomTopBar({
     }
   };
 
+  const action =
+    "inline-flex items-center gap-1.5 rounded-md p-2.5 text-sm text-muted transition-colors hover:bg-raised hover:text-fg md:px-3 md:py-2";
+
   return (
-    <header className="flex h-18 items-center justify-between border-b border-white/10 bg-[#12183f]/70 px-5 backdrop-blur-md">
-      
-      {/* LEFT */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 pr-4">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500">
-            <Video size={16} />
-          </div>
-          <span className="text-2xl font-bold text-sky-300">CoWatch</span>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/85">
-          Room: <span className="font-semibold">{roomName}</span>
-        </div>
-
-        <button
-          onClick={handleCopyRoomId}
-          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-cyan-300 hover:bg-white/10"
-          title="Copy room ID"
-        >
-          ID: {roomId} {copied ? <Check size={14} /> : <Copy size={14} />}
-        </button>
-      </div>
-
-      {/* RIGHT */}
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded-xl bg-white/5 px-3 py-2 text-sm text-white/85">
-          <Users size={14} /> {watcherCount} watching
+    <header className="flex h-14 items-center justify-between border-b border-line bg-bg px-3 sm:px-5">
+      <div className="flex min-w-0 items-center gap-5">
+        <span className="font-display text-xl tracking-tight text-accent">
+          CoWatch
         </span>
 
-        {/* ✅ SHOW ONLY FOR ADMIN */}
+        <span className="hidden h-4 w-px bg-line sm:block" />
+
+        <div className="flex min-w-0 items-baseline gap-3">
+          <span className="truncate text-sm font-medium">{roomName}</span>
+          <button
+            onClick={handleCopyRoomId}
+            title="Copy room ID"
+            className="eyebrow hidden items-center gap-1.5 text-muted transition-colors hover:text-accent sm:inline-flex"
+          >
+            {roomId}
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <span className="mr-2 inline-flex items-center gap-1.5 text-sm text-muted">
+          <Users size={14} /> {watcherCount}
+        </span>
+
         {isAdmin && (
-          <span className="inline-flex items-center gap-1 rounded-xl bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
-            <Crown size={14} /> Admin
+          <span className="eyebrow mr-2 hidden rounded border border-accent/30 px-2 py-1.5 text-accent md:inline-block">
+            Admin
           </span>
         )}
 
-        <button
-          onClick={onInvite}
-          className="inline-flex items-center gap-1 rounded-xl bg-white/10 px-3 py-2 text-sm hover:bg-white/15"
-        >
-          <Link2 size={14} /> Invite
+        <button onClick={onInvite} className={action}>
+          <Link2 size={14} /> <span className="hidden md:inline">Invite</span>
         </button>
 
-        <button
-          onClick={onSetVideo}
-          className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500 px-4 py-2 text-sm font-semibold"
-        >
-          <Video size={14} /> Set Video
-        </button>
+        {isAdmin && (
+          <button onClick={onSetVideo} className={action}>
+            <Video size={14} /> <span className="hidden md:inline">Set video</span>
+          </button>
+        )}
 
         <button
           onClick={onLeave}
-          className="inline-flex items-center gap-1 rounded-xl bg-linear-to-r from-rose-500 to-pink-500 px-4 py-2 text-sm font-semibold"
+          className="inline-flex items-center gap-1.5 rounded-md p-2.5 text-sm text-danger/90 transition-colors hover:bg-danger/10 hover:text-danger md:px-3 md:py-2"
         >
-          <LogOut size={14} /> Leave
+          <LogOut size={14} /> <span className="hidden md:inline">Leave</span>
         </button>
       </div>
     </header>

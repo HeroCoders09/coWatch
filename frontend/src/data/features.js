@@ -1,24 +1,18 @@
-import { Play, MessageSquare, Shield, Zap } from "lucide-react";
-
 export const features = [
   {
-    icon: Play,
-    title: "Synchronized Playback",
-    desc: "Watch videos perfectly in sync with friends, no matter where they are."
+    title: "Synchronized playback",
+    desc: "The room admin drives play, pause and seek. Everyone else follows the same timeline.",
   },
   {
-    icon: MessageSquare,
-    title: "Real-time Chat",
-    desc: "Chat with your friends while watching. React and discuss in real-time."
+    title: "Live chat",
+    desc: "Talk while you watch. Messages are saved, so you can scroll back through the history.",
   },
   {
-    icon: Shield,
-    title: "Secure Rooms",
-    desc: "Password-protected rooms with CAPTCHA verification for security."
+    title: "Invite by link",
+    desc: "Send a link and friends land straight in your room. No accounts, no installs.",
   },
   {
-    icon: Zap,
-    title: "Zero Lag",
-    desc: "WebSocket technology ensures instant synchronization across all viewers."
-  }
+    title: "Admin controls",
+    desc: "One person picks the video. Hand over control to anyone in the room at any time.",
+  },
 ];

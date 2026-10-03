@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
-import { Link2, Copy, Check, Mail } from "lucide-react";
+import { Copy, Check, Mail } from "lucide-react";
 import ModalShell from "./ModalShell";
+import Button from "../../ui/Button";
+import { copyText } from "../../../utils/clipboard";
 
-export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
+export default function InviteModal({ open, onClose, roomId = "" }) {
   const [copied, setCopied] = useState(false);
 
   const inviteLink = useMemo(() => {
@@ -11,12 +13,10 @@ export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
   }, [roomId]);
 
   const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteLink);
+    const ok = await copyText(inviteLink);
+    if (ok) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // no-op
+      setTimeout(() => setCopied(false), 1500);
     }
   };
 
@@ -32,61 +32,33 @@ export default function InviteModal({ open, onClose, roomId = "ADAF77CF" }) {
     <ModalShell
       open={open}
       onClose={onClose}
-      title="Invite People"
-      maxWidth="max-w-[560px]"
+      title="Invite people"
+      maxWidth="max-w-lg"
       footer={
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="rounded-xl px-5 py-2.5 text-white/85 hover:bg-white/10"
-          >
-            Close
-          </button>
-          <button
-            onClick={copyLink}
-            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-400 to-fuchsia-500 px-5 py-2.5 font-semibold text-white"
-          >
-            {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? "Copied!" : "Copy Link"}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button variant="ghost" onClick={shareByEmail} icon={Mail}>
+            Email
+          </Button>
+          <div className="flex gap-3">
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+            <Button onClick={copyLink} icon={copied ? Check : Copy}>
+              {copied ? "Copied" : "Copy link"}
+            </Button>
+          </div>
         </div>
       }
     >
-      <p className="mb-4 text-white/70">
-        Share this room link with friends so they can join directly.
+      <p className="mb-4 text-sm text-muted">
+        Anyone with this link can join the room.
       </p>
-
-      <label className="mb-2 block text-sm text-white/80">Room Invite Link</label>
-
-      {/* FIXED ROW */}
-      <div className="w-full overflow-hidden rounded-xl border border-white/15 bg-white/4 p-2">
-        <div className="flex w-full items-center gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-black/20 px-3 py-2.5">
-            <Link2 size={16} className="shrink-0 text-cyan-300" />
-            <span className="block min-w-0 truncate text-sm text-white/90">
-              {inviteLink}
-            </span>
-          </div>
-
-          <button
-            onClick={copyLink}
-            className="shrink-0 inline-flex h-10.5 items-center gap-2 rounded-lg bg-white/10 px-3 text-sm text-white hover:bg-white/15"
-          >
-            {copied ? <Check size={15} className="text-emerald-400" /> : <Copy size={15} />}
-            {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
+      <div className="rounded-lg border border-line bg-bg px-3.5 py-3">
+        <span className="block truncate text-sm text-fg">{inviteLink}</span>
       </div>
-
-      <div className="mt-4">
-        <button
-          onClick={shareByEmail}
-          className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/4 px-4 py-2.5 text-sm text-white/90 hover:bg-white/8"
-        >
-          <Mail size={15} />
-          Share via Email
-        </button>
-      </div>
+      <p className="eyebrow mt-5 text-muted">
+        Room code <span className="ml-2 text-accent">{roomId}</span>
+      </p>
     </ModalShell>
   );
 }

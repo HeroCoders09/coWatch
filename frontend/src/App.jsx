@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import Navbar from "./components/layout/Navbar";
 import HeroSection from "./components/sections/HeroSection";
 import FeaturesSection from "./components/sections/FeaturesSection";
-import DemoSection from "./components/sections/DemoSection";
 import ReadySection from "./components/sections/ReadySection";
 import Footer from "./components/layout/Footer";
 import RoomAccessModal from "./components/modals/RoomAccessModal";
@@ -13,11 +12,35 @@ import { generateRoomId } from "./utils/room";
 const ROOM_STORAGE_KEY = "cowatch_active_room";
 const CLIENT_ID_KEY = "cowatch_client_id";
 
+// An invite link (?join=CODE) always wins over a saved room, so following a
+// link never drops you back into whatever room you were in before.
+function readSavedRoom() {
+  try {
+    const raw = localStorage.getItem(ROOM_STORAGE_KEY);
+    if (!raw) return null;
+
+    const saved = JSON.parse(raw);
+    if (!saved?.roomId || !saved?.name) return null;
+
+    const invited = new URLSearchParams(window.location.search).get("join");
+    if (invited && invited.toUpperCase() !== String(saved.roomId).toUpperCase()) {
+      return null;
+    }
+    return saved;
+  } catch (e) {
+    console.error("Failed to restore room from storage", e);
+    localStorage.removeItem(ROOM_STORAGE_KEY);
+    return null;
+  }
+}
+
 export default function App() {
+  const [restored] = useState(readSavedRoom);
   const [modalMode, setModalMode] = useState(null);
-  const [inRoom, setInRoom] = useState(false);
-  const [roomData, setRoomData] = useState(null);
+  const [inRoom, setInRoom] = useState(Boolean(restored));
+  const [roomData, setRoomData] = useState(restored);
   const [prefillRoomId, setPrefillRoomId] = useState("");
+  const [joinError, setJoinError] = useState("");
 
   const clientId = useMemo(() => {
     let id = localStorage.getItem(CLIENT_ID_KEY);
@@ -26,23 +49,6 @@ export default function App() {
       localStorage.setItem(CLIENT_ID_KEY, id);
     }
     return id;
-  }, []);
-
-  // restore active room
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(ROOM_STORAGE_KEY);
-      if (!raw) return;
-
-      const saved = JSON.parse(raw);
-      if (saved?.roomId && saved?.name) {
-        setRoomData(saved);
-        setInRoom(true);
-      }
-    } catch (e) {
-      console.error("Failed to restore room from storage", e);
-      localStorage.removeItem(ROOM_STORAGE_KEY);
-    }
   }, []);
 
   // auto-open join modal if invite param exists: /?join=ROOMID
@@ -55,6 +61,18 @@ export default function App() {
       setModalMode("join");
     }
   }, [inRoom]);
+
+  // the server said the room doesn't exist: go back to the landing page and
+  // reopen the join dialog with the code so it can be corrected
+  const handleRoomNotFound = (roomId, message) => {
+    localStorage.removeItem(ROOM_STORAGE_KEY);
+    setInRoom(false);
+    setRoomData(null);
+    setJoinError(message || "That room doesn't exist or has ended.");
+    setPrefillRoomId(roomId || "");
+    setModalMode("join");
+    window.history.replaceState({}, "", "/");
+  };
 
   const handleSuccess = (payload, mode) => {
     if (mode === "create") {
@@ -70,7 +88,6 @@ export default function App() {
         clientId,
       });
 
-      // keep URL shareable
       window.history.replaceState({}, "", `/?join=${encodeURIComponent(roomId)}`);
     } else {
       const normalizedRoomId = payload.roomId.toUpperCase();
@@ -84,10 +101,10 @@ export default function App() {
         clientId,
       });
 
-      // normalize URL
       window.history.replaceState({}, "", `/?join=${encodeURIComponent(normalizedRoomId)}`);
     }
 
+    setJoinError("");
     setModalMode(null);
     setInRoom(true);
   };
@@ -96,12 +113,12 @@ export default function App() {
     return (
       <RoomPage
         roomData={roomData}
+        onRoomNotFound={handleRoomNotFound}
         onLeaveRoom={() => {
           localStorage.removeItem(ROOM_STORAGE_KEY);
           setInRoom(false);
           setRoomData(null);
           setPrefillRoomId("");
-          // clear invite query when leaving
           window.history.replaceState({}, "", "/");
         }}
       />
@@ -109,7 +126,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen text-white bg-[radial-gradient(circle_at_12%_8%,rgba(35,62,128,.45)_0%,transparent_36%),radial-gradient(circle_at_88%_18%,rgba(78,49,146,.32)_0%,transparent_32%),linear-gradient(130deg,#0a1130_0%,#171a56_55%,#0a1438_100%)]">
+    <div className="min-h-screen bg-bg text-fg">
       <Navbar
         onCreateRoom={() => setModalMode("create")}
         onJoinRoom={() => setModalMode("join")}
@@ -119,16 +136,19 @@ export default function App() {
         onJoinRoom={() => setModalMode("join")}
       />
       <FeaturesSection />
-      <DemoSection />
       <ReadySection onCreateRoom={() => setModalMode("create")} />
       <Footer />
 
       <RoomAccessModal
         open={Boolean(modalMode)}
         mode={modalMode || "create"}
-        onClose={() => setModalMode(null)}
+        onClose={() => {
+          setModalMode(null);
+          setJoinError("");
+        }}
         onSuccess={handleSuccess}
         prefillRoomId={prefillRoomId}
+        initialError={joinError}
       />
     </div>
   );
