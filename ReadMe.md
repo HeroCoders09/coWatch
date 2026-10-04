@@ -2,6 +2,11 @@
 
 CoWatch is a real-time co-watching web app. Create or join a room, watch a synced video together, chat live, send emoji reactions, and manage who controls playback (admin / viewers), all over Socket.IO.
 
+**Live demo:** https://co-watch-peach.vercel.app
+**Backend health check:** https://cowatch-9ehc.onrender.com/health  
+
+> The backend runs on a free Render instance that sleeps after about 15 minutes of inactivity. The first visit after a quiet period can take 30–60 seconds to wake up.
+
 ---
 
 ## Features
@@ -38,6 +43,7 @@ CoWatch is a real-time co-watching web app. Create or join a room, watch a synce
 - **Backend:** Node.js (ESM), Express 5, Socket.IO 4
 - **Database:** PostgreSQL through Prisma 6 (developed against Supabase)
 - **Realtime protocol:** WebSockets (with polling fallback)
+- **Hosting (free tier):** Vercel (frontend), Render (backend), Supabase (database)
 
 ---
 
@@ -136,6 +142,67 @@ npm run dev
 ```
 
 Open the frontend, create a room, then open the invite link in a second browser window to try sync, chat and reactions.
+
+---
+
+## Deployment (free tier)
+
+CoWatch is deployed with **Vercel** (frontend), **Render** (backend) and **Supabase** (PostgreSQL). The backend needs a long-running Node server with WebSockets, so it cannot run on serverless functions.
+
+### 1) Database (Supabase)
+1. In Supabase open **Project Settings → Database → Connection string**.
+2. Use the **pooler (port 6543)** string as `DATABASE_URL` (add `?pgbouncer=true` if missing).
+3. Use the **direct / session (port 5432)** string as `DIRECT_URL`.
+4. From `backend/`, with both values in `.env`, run `npx prisma generate` and `npx prisma db push` to create the tables.
+
+### 2) Backend (Render)
+1. **New → Web Service**, connect the GitHub repo.
+2. Settings:
+   - Root Directory: `backend`
+   - Build Command: `npm install && npx prisma generate`
+   - Start Command: `npm start`
+   - Instance type: Free
+3. Environment variables:
+
+   | Key | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Supabase pooler string |
+   | `DIRECT_URL` | Supabase direct string |
+   | `CORS_ORIGINS` | Your exact Vercel URL, no trailing slash (comma-separate several) |
+
+   Do not set `PORT`; Render provides it.
+4. Check `https://<service>.onrender.com/health` returns `{"ok":true}`.
+
+### 3) Frontend (Vercel)
+1. **Add New → Project**, import the repo (a personal Hobby account is enough; no team is needed).
+2. Settings:
+   - Root Directory: `frontend`
+   - Framework preset: Vite (build `npm run build`, output `dist`)
+3. Environment variables:
+
+   | Key | Value |
+   | --- | --- |
+   | `VITE_BACKEND_URL` | `https://<service>.onrender.com` |
+   | `VITE_DRIVE_API_KEY` | Your Google API key (optional) |
+
+   Vite reads these at build time, so redeploy after changing them.
+
+### 4) Connect and verify
+1. Set `CORS_ORIGINS` on Render to the final Vercel URL and let it redeploy.
+2. Open the site, create a room, and join from a second device or private window to test sync, chat and reactions.
+
+### 5) Keep the backend awake (optional)
+Render's free instances sleep after ~15 minutes without traffic. Add an UptimeRobot HTTP monitor on `/health` with a 5-minute interval to avoid the cold start.
+
+### 6) Restrict the Google Drive key
+In Google Cloud Console go to **APIs & Services → Credentials → your key**:
+- Application restrictions: **Websites**, and add `https://your-app.vercel.app/*` and `http://localhost:5173/*`
+- API restrictions: **Restrict key → Google Drive API**
+
+### Deployment notes
+- Run **one backend instance only**; live room state is held in memory.
+- A CORS error in the browser console almost always means `CORS_ORIGINS` doesn't exactly match the frontend URL (trailing slash or `http` vs `https`).
+- Supabase can pause inactive free projects; open the dashboard to resume if the backend can't reach the database.
 
 ---
 
@@ -247,6 +314,7 @@ Live presence (who is connected) stays in memory. Rooms are also saved to the `R
 ## Known Notes and Limitations
 
 - Live room state is held in memory by one backend process. For several instances you would need the Socket.IO Redis adapter plus sticky sessions.
+- The free Render backend sleeps when idle, so the first request after a quiet period is slow.
 - Restored rooms always come back paused; the admin presses play.
 - Identity is a browser-held `clientId`, not an account (see above).
 - Drive playback depends on the file's sharing settings, format and Google's quotas.
