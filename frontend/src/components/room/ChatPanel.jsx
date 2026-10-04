@@ -20,8 +20,11 @@ export default function ChatPanel({
   const [nextCursor, setNextCursor] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // lets the socket handlers (set up once) see the latest selfId
   const selfIdRef = useRef(selfId);
-  selfIdRef.current = selfId;
+  useEffect(() => {
+    selfIdRef.current = selfId;
+  }, [selfId]);
 
   const listRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -247,7 +250,7 @@ export default function ChatPanel({
               }`}
             >
               <span
-                className={`absolute left-0.5 top-0.5 h-4.5 w-4.5 rounded-full transition-transform ${
+                className={`absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full transition-transform ${
                   sharedControl ? "translate-x-5 bg-accent" : "translate-x-0 bg-muted"
                 }`}
               />
